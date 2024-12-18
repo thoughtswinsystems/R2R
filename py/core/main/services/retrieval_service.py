@@ -1,28 +1,28 @@
 import json
 import logging
 import time
-from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
+from fastapi import HTTPException
+
 from core import R2RStreamingRAGAgent
 from core.base import (
-    CompletionRecord,
+    DocumentResponse,
+    EmbeddingPurpose,
     GenerationConfig,
-    KGSearchSettings,
+    GraphSearchSettings,
     Message,
-    MessageType,
     R2RException,
-    R2RLoggingProvider,
     RunManager,
-    RunType,
-    VectorSearchSettings,
+    SearchMode,
+    SearchSettings,
     manage_run,
     to_async_generator,
 )
-from core.base.api.models import RAGResponse, SearchResponse, UserResponse
+from core.base.api.models import CombinedSearchResponse, RAGResponse, User
 from core.telemetry.telemetry_decorator import telemetry_event
-from core.utils import generate_message_id
+from shared.api.models.management.responses import MessageResponse
 
 from ..abstractions import R2RAgents, R2RPipelines, R2RPipes, R2RProviders
 from ..config import R2RConfig
@@ -40,7 +40,6 @@ class RetrievalService(Service):
         pipelines: R2RPipelines,
         agents: R2RAgents,
         run_manager: RunManager,
-        logging_connection: R2RLoggingProvider,
     ):
         super().__init__(
             config,
@@ -49,32 +48,21 @@ class RetrievalService(Service):
             pipelines,
             agents,
             run_manager,
-            logging_connection,
         )
 
     @telemetry_event("Search")
-    async def search(
+    async def search(  # TODO - rename to 'search_chunks'
         self,
         query: str,
-        vector_search_settings: VectorSearchSettings = VectorSearchSettings(),
-        kg_search_settings: KGSearchSettings = KGSearchSettings(),
+        search_settings: SearchSettings = SearchSettings(),
         *args,
         **kwargs,
-    ) -> SearchResponse:
-        async with manage_run(self.run_manager, RunType.RETRIEVAL) as run_id:
+    ) -> CombinedSearchResponse:
+        async with manage_run(self.run_manager) as run_id:
             t0 = time.time()
 
             if (
-                kg_search_settings.use_kg_search
-                and self.config.kg.provider is None
-            ):
-                raise R2RException(
-                    status_code=400,
-                    message="Knowledge Graph search is not enabled in the configuration.",
-                )
-
-            if (
-                vector_search_settings.use_vector_search
+                search_settings.use_semantic_search
                 and self.config.database.provider is None
             ):
                 raise R2RException(
@@ -83,23 +71,24 @@ class RetrievalService(Service):
                 )
 
             if (
-                vector_search_settings.use_vector_search
-                and vector_search_settings.use_hybrid_search
-                and not vector_search_settings.hybrid_search_settings
-            ):
+                (
+                    search_settings.use_semantic_search
+                    and search_settings.use_fulltext_search
+                )
+                or search_settings.use_hybrid_search
+            ) and not search_settings.hybrid_settings:
                 raise R2RException(
                     status_code=400,
                     message="Hybrid search settings must be specified in the input configuration.",
                 )
             # TODO - Remove these transforms once we have a better way to handle this
-            for filter, value in vector_search_settings.filters.items():
+            for filter, value in search_settings.filters.items():
                 if isinstance(value, UUID):
-                    vector_search_settings.filters[filter] = str(value)
+                    search_settings.filters[filter] = str(value)
             merged_kwargs = {
                 "input": to_async_generator([query]),
                 "state": None,
-                "vector_search_settings": vector_search_settings,
-                "kg_search_settings": kg_search_settings,
+                "search_settings": search_settings,
                 "run_manager": self.run_manager,
                 **kwargs,
             }
@@ -111,13 +100,22 @@ class RetrievalService(Service):
             t1 = time.time()
             latency = f"{t1 - t0:.2f}"
 
-            await self.logging_connection.log(
-                run_id=run_id,
-                key="search_latency",
-                value=latency,
-            )
-
             return results.as_dict()
+
+    @telemetry_event("SearchDocuments")
+    async def search_documents(
+        self,
+        query: str,
+        settings: SearchSettings,
+        query_embedding: Optional[list[float]] = None,
+    ) -> list[DocumentResponse]:
+        return (
+            await self.providers.database.documents_handler.search_documents(
+                query_text=query,
+                settings=settings,
+                query_embedding=query_embedding,
+            )
+        )
 
     @telemetry_event("Completion")
     async def completion(
@@ -128,38 +126,43 @@ class RetrievalService(Service):
         **kwargs,
     ):
         return await self.providers.llm.aget_completion(
-            messages,
+            [message.to_dict() for message in messages],
             generation_config,
             *args,
             **kwargs,
         )
+
+    @telemetry_event("Embedding")
+    async def embedding(
+        self,
+        text: str,
+    ):
+        return await self.providers.embedding.async_get_embedding(text=text)
 
     @telemetry_event("RAG")
     async def rag(
         self,
         query: str,
         rag_generation_config: GenerationConfig,
-        vector_search_settings: VectorSearchSettings = VectorSearchSettings(),
-        kg_search_settings: KGSearchSettings = KGSearchSettings(),
+        search_settings: SearchSettings = SearchSettings(),
         *args,
         **kwargs,
     ) -> RAGResponse:
-        async with manage_run(self.run_manager, RunType.RETRIEVAL) as run_id:
+        async with manage_run(self.run_manager) as run_id:
             try:
                 # TODO - Remove these transforms once we have a better way to handle this
                 for (
                     filter,
                     value,
-                ) in vector_search_settings.filters.items():
+                ) in search_settings.filters.items():
                     if isinstance(value, UUID):
-                        vector_search_settings.filters[filter] = str(value)
+                        search_settings.filters[filter] = str(value)
 
                 if rag_generation_config.stream:
                     return await self.stream_rag_response(
                         query,
                         rag_generation_config,
-                        vector_search_settings,
-                        kg_search_settings,
+                        search_settings,
                         *args,
                         **kwargs,
                     )
@@ -167,8 +170,7 @@ class RetrievalService(Service):
                 merged_kwargs = {
                     "input": to_async_generator([query]),
                     "state": None,
-                    "vector_search_settings": vector_search_settings,
-                    "kg_search_settings": kg_search_settings,
+                    "search_settings": search_settings,
                     "run_manager": self.run_manager,
                     "rag_generation_config": rag_generation_config,
                     **kwargs,
@@ -194,20 +196,19 @@ class RetrievalService(Service):
             except Exception as e:
                 logger.error(f"Pipeline error: {str(e)}")
                 if "NoneType" in str(e):
-                    raise R2RException(
+                    raise HTTPException(
                         status_code=502,
-                        message="Remote server not reachable or returned an invalid response",
+                        detail="Remote server not reachable or returned an invalid response",
                     ) from e
-                raise R2RException(
-                    status_code=500, message="Internal Server Error"
+                raise HTTPException(
+                    status_code=500, detail="Internal Server Error"
                 ) from e
 
     async def stream_rag_response(
         self,
         query,
         rag_generation_config,
-        vector_search_settings,
-        kg_search_settings,
+        search_settings,
         *args,
         **kwargs,
     ):
@@ -217,8 +218,7 @@ class RetrievalService(Service):
                     "input": to_async_generator([query]),
                     "state": None,
                     "run_manager": self.run_manager,
-                    "vector_search_settings": vector_search_settings,
-                    "kg_search_settings": kg_search_settings,
+                    "search_settings": search_settings,
                     "rag_generation_config": rag_generation_config,
                     **kwargs,
                 }
@@ -237,21 +237,15 @@ class RetrievalService(Service):
     async def agent(
         self,
         rag_generation_config: GenerationConfig,
-        vector_search_settings: VectorSearchSettings = VectorSearchSettings(),
-        kg_search_settings: KGSearchSettings = KGSearchSettings(),
+        search_settings: SearchSettings = SearchSettings(),
         task_prompt_override: Optional[str] = None,
         include_title_if_available: Optional[bool] = False,
-        conversation_id: Optional[str] = None,
-        branch_id: Optional[str] = None,
+        conversation_id: Optional[UUID] = None,
         message: Optional[Message] = None,
         messages: Optional[list[Message]] = None,
-        *args,
-        **kwargs,
     ):
-        async with manage_run(self.run_manager, RunType.RETRIEVAL) as run_id:
+        async with manage_run(self.run_manager) as run_id:
             try:
-                t0 = time.time()
-
                 if message and messages:
                     raise R2RException(
                         status_code=400,
@@ -264,80 +258,122 @@ class RetrievalService(Service):
                         message="Either message or messages should be provided",
                     )
 
-                # Transform UUID filters to strings
-                for filter, value in vector_search_settings.filters.items():
-                    if isinstance(value, UUID):
-                        vector_search_settings.filters[filter] = str(value)
+                # Ensure 'message' is a Message instance
+                if message and not isinstance(message, Message):
+                    if isinstance(message, dict):
+                        message = Message.from_dict(message)
+                    else:
+                        raise R2RException(
+                            status_code=400,
+                            message="""
+                                Invalid message format. The expected format contains:
+                                    role: MessageType | 'system' | 'user' | 'assistant' | 'function'
+                                    content: Optional[str]
+                                    name: Optional[str]
+                                    function_call: Optional[dict[str, Any]]
+                                    tool_calls: Optional[list[dict[str, Any]]]
+                                    """,
+                        )
 
-                ids = None
+                # Ensure 'messages' is a list of Message instances
+                if messages:
+                    processed_messages = []
+                    for message in messages:
+                        if isinstance(message, Message):
+                            processed_messages.append(message)
+                        elif hasattr(message, "dict"):
+                            processed_messages.append(
+                                Message.from_dict(message.dict())
+                            )
+                        elif isinstance(message, dict):
+                            processed_messages.append(
+                                Message.from_dict(message)
+                            )
+                        else:
+                            processed_messages.append(
+                                Message.from_dict(str(message))
+                            )
+                    messages = processed_messages
+                else:
+                    messages = []
+
+                # Transform UUID filters to strings
+                for filter_key, value in search_settings.filters.items():
+                    if isinstance(value, UUID):
+                        search_settings.filters[filter_key] = str(value)
+
+                ids = []
+
+                if conversation_id:  # Fetch the existing conversation
+                    try:
+                        conversation = await self.providers.database.conversations_handler.get_conversations_overview(
+                            offset=0,
+                            limit=1,
+                            conversation_ids=[conversation_id],
+                        )
+                    except Exception as e:
+                        logger.error(f"Error fetching conversation: {str(e)}")
+
+                    if conversation is not None:
+                        messages_from_conversation: list[Message] = []
+                        for message_response in conversation:
+                            if isinstance(message_response, MessageResponse):
+                                messages_from_conversation.append(
+                                    message_response.message
+                                )
+                                ids.append(message_response.id)
+                            else:
+                                logger.warning(
+                                    f"Unexpected type in conversation found: {type(message_response)}\n{message_response}"
+                                )
+                        messages = messages_from_conversation + messages
+                else:  # Create new conversation
+                    conversation_response = (
+                        await self.providers.database.conversations_handler.create_conversation()
+                    )
+                    conversation_id = conversation_response.id
+
+                if message:
+                    messages.append(message)
 
                 if not messages:
-                    # Fetch or create conversation
-                    if conversation_id:
-                        conversation = (
-                            await self.logging_connection.get_conversation(
-                                conversation_id, branch_id
-                            )
-                        )
-                        messages = [conv[1] for conv in conversation] + [
-                            message
-                        ]
-                        ids = [conv[0] for conv in conversation]
-                    else:
-                        conversation_id = (
-                            await self.logging_connection.create_conversation()
-                        )
-                        messages = [message]  # type: ignore
-                else:
-                    if not conversation_id:
-                        conversation_id = (
-                            await self.logging_connection.create_conversation()
-                        )
+                    raise R2RException(
+                        status_code=400,
+                        message="No messages to process",
+                    )
 
-                        parent_id = None
-                        for inner_message in messages[:-1]:
-
-                            parent_id = (
-                                await self.logging_connection.add_message(
-                                    conversation_id, inner_message, parent_id
-                                )
-                            )
-                        message = messages[-1]
+                current_message = messages[-1]
 
                 # Save the new message to the conversation
-                message_id = await self.logging_connection.add_message(
-                    conversation_id,  # type: ignore
-                    message,  # type: ignore
-                    parent_id=str(ids[-2]) if (ids and len(ids) > 1) else None,  # type: ignore
+                parent_id = ids[-1] if ids else None
+                message_response = await self.providers.database.conversations_handler.add_message(
+                    conversation_id=conversation_id,
+                    content=current_message,
+                    parent_id=parent_id,
+                )
+
+                message_id = (
+                    message_response.id
+                    if message_response is not None
+                    else None
                 )
 
                 if rag_generation_config.stream:
-                    t1 = time.time()
-                    latency = f"{t1 - t0:.2f}"
-
-                    await self.logging_connection.log(
-                        run_id=run_id,
-                        key="rag_agent_generation_latency",
-                        value=latency,
-                    )
 
                     async def stream_response():
                         async with manage_run(self.run_manager, "rag_agent"):
                             agent = R2RStreamingRAGAgent(
+                                database_provider=self.providers.database,
                                 llm_provider=self.providers.llm,
-                                prompt_provider=self.providers.prompt,
                                 config=self.config.agent,
                                 search_pipeline=self.pipelines.search_pipeline,
                             )
                             async for chunk in agent.arun(
                                 messages=messages,
                                 system_instruction=task_prompt_override,
-                                vector_search_settings=vector_search_settings,
-                                kg_search_settings=kg_search_settings,
+                                search_settings=search_settings,
                                 rag_generation_config=rag_generation_config,
                                 include_title_if_available=include_title_if_available,
-                                *args,
-                                **kwargs,
                             ):
                                 yield chunk
 
@@ -346,41 +382,44 @@ class RetrievalService(Service):
                 results = await self.agents.rag_agent.arun(
                     messages=messages,
                     system_instruction=task_prompt_override,
-                    vector_search_settings=vector_search_settings,
-                    kg_search_settings=kg_search_settings,
+                    search_settings=search_settings,
                     rag_generation_config=rag_generation_config,
                     include_title_if_available=include_title_if_available,
-                    *args,
-                    **kwargs,
                 )
-                await self.logging_connection.add_message(
-                    conversation_id,
-                    Message(**results[-1]),
+
+                # Save the assistant's reply to the conversation
+                if isinstance(results[-1], dict):
+                    assistant_message = Message(**results[-1])
+                elif isinstance(results[-1], Message):
+                    assistant_message = results[-1]
+                else:
+                    assistant_message = Message(
+                        role="assistant", content=str(results[-1])
+                    )
+
+                await self.providers.database.conversations_handler.add_message(
+                    conversation_id=conversation_id,
+                    content=assistant_message,
                     parent_id=message_id,
                 )
 
-                t1 = time.time()
-                latency = f"{t1 - t0:.2f}"
-
-                await self.logging_connection.log(
-                    run_id=run_id,
-                    key="rag_agent_generation_latency",
-                    value=latency,
-                )
                 return {
                     "messages": results,
-                    "conversation_id": conversation_id,
+                    "conversation_id": str(
+                        conversation_id
+                    ),  # Ensure it's a string
                 }
 
             except Exception as e:
-                logger.error(f"Pipeline error: {str(e)}")
+                logger.error(f"Error in agent response: {str(e)}")
                 if "NoneType" in str(e):
-                    raise R2RException(
+                    raise HTTPException(
                         status_code=502,
-                        message="Server not reachable or returned an invalid response",
+                        detail="Server not reachable or returned an invalid response",
                     )
-                raise R2RException(
-                    status_code=500, message="Internal Server Error"
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Internal Server Error - {str(e)}",
                 )
 
 
@@ -392,19 +431,17 @@ class RetrievalServiceAdapter:
                 user_data = json.loads(user_data)
             except json.JSONDecodeError:
                 raise ValueError(f"Invalid user data format: {user_data}")
-        return UserResponse.from_dict(user_data)
+        return User.from_dict(user_data)
 
     @staticmethod
     def prepare_search_input(
         query: str,
-        vector_search_settings: VectorSearchSettings,
-        kg_search_settings: KGSearchSettings,
-        user: UserResponse,
+        search_settings: SearchSettings,
+        user: User,
     ) -> dict:
         return {
             "query": query,
-            "vector_search_settings": vector_search_settings.to_dict(),
-            "kg_search_settings": kg_search_settings.to_dict(),
+            "search_settings": search_settings.to_dict(),
             "user": user.to_dict(),
         }
 
@@ -412,11 +449,8 @@ class RetrievalServiceAdapter:
     def parse_search_input(data: dict):
         return {
             "query": data["query"],
-            "vector_search_settings": VectorSearchSettings.from_dict(
-                data["vector_search_settings"]
-            ),
-            "kg_search_settings": KGSearchSettings.from_dict(
-                data["kg_search_settings"]
+            "search_settings": SearchSettings.from_dict(
+                data["search_settings"]
             ),
             "user": RetrievalServiceAdapter._parse_user_data(data["user"]),
         }
@@ -424,16 +458,14 @@ class RetrievalServiceAdapter:
     @staticmethod
     def prepare_rag_input(
         query: str,
-        vector_search_settings: VectorSearchSettings,
-        kg_search_settings: KGSearchSettings,
+        search_settings: SearchSettings,
         rag_generation_config: GenerationConfig,
         task_prompt_override: Optional[str],
-        user: UserResponse,
+        user: User,
     ) -> dict:
         return {
             "query": query,
-            "vector_search_settings": vector_search_settings.to_dict(),
-            "kg_search_settings": kg_search_settings.to_dict(),
+            "search_settings": search_settings.to_dict(),
             "rag_generation_config": rag_generation_config.to_dict(),
             "task_prompt_override": task_prompt_override,
             "user": user.to_dict(),
@@ -443,11 +475,8 @@ class RetrievalServiceAdapter:
     def parse_rag_input(data: dict):
         return {
             "query": data["query"],
-            "vector_search_settings": VectorSearchSettings.from_dict(
-                data["vector_search_settings"]
-            ),
-            "kg_search_settings": KGSearchSettings.from_dict(
-                data["kg_search_settings"]
+            "search_settings": SearchSettings.from_dict(
+                data["search_settings"]
             ),
             "rag_generation_config": GenerationConfig.from_dict(
                 data["rag_generation_config"]
@@ -459,36 +488,29 @@ class RetrievalServiceAdapter:
     @staticmethod
     def prepare_agent_input(
         message: Message,
-        vector_search_settings: VectorSearchSettings,
-        kg_search_settings: KGSearchSettings,
+        search_settings: SearchSettings,
         rag_generation_config: GenerationConfig,
         task_prompt_override: Optional[str],
         include_title_if_available: bool,
-        user: UserResponse,
+        user: User,
         conversation_id: Optional[str] = None,
-        branch_id: Optional[str] = None,
     ) -> dict:
         return {
             "message": message.to_dict(),
-            "vector_search_settings": vector_search_settings.to_dict(),
-            "kg_search_settings": kg_search_settings.to_dict(),
+            "search_settings": search_settings.to_dict(),
             "rag_generation_config": rag_generation_config.to_dict(),
             "task_prompt_override": task_prompt_override,
             "include_title_if_available": include_title_if_available,
             "user": user.to_dict(),
             "conversation_id": conversation_id,
-            "branch_id": branch_id,
         }
 
     @staticmethod
     def parse_agent_input(data: dict):
         return {
             "message": Message.from_dict(data["message"]),
-            "vector_search_settings": VectorSearchSettings.from_dict(
-                data["vector_search_settings"]
-            ),
-            "kg_search_settings": KGSearchSettings.from_dict(
-                data["kg_search_settings"]
+            "search_settings": SearchSettings.from_dict(
+                data["search_settings"]
             ),
             "rag_generation_config": GenerationConfig.from_dict(
                 data["rag_generation_config"]
@@ -497,5 +519,4 @@ class RetrievalServiceAdapter:
             "include_title_if_available": data["include_title_if_available"],
             "user": RetrievalServiceAdapter._parse_user_data(data["user"]),
             "conversation_id": data.get("conversation_id"),
-            "branch_id": data.get("branch_id"),
         }

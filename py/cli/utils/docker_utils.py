@@ -88,7 +88,7 @@ async def run_local_serve(
     full: bool = False,
 ) -> None:
     try:
-        from r2r import R2RBuilder, R2RConfig
+        from core import R2RBuilder, R2RConfig
     except ImportError as e:
         click.echo(
             "Error: You must install the `r2r core` package to run the R2R server locally."
@@ -109,7 +109,7 @@ async def run_local_serve(
         llm_provider = completion_config.provider
         llm_model = completion_config.generation_config.model
         model_provider = llm_model.split("/")[0]
-        check_llm_reqs(llm_provider, model_provider, include_ollama=True)
+        check_llm_reqs(llm_provider, model_provider)
 
     click.echo("R2R now runs on port 7272 by default!")
     available_port = find_available_port(port)
@@ -122,7 +122,7 @@ async def run_local_serve(
     #     "core.main.app_entry:app", host=host, port=available_port, reload=False
     # )
 
-    r2r_instance.serve(host, available_port)
+    await r2r_instance.serve(host, available_port)
 
 
 def run_docker_serve(
@@ -134,6 +134,7 @@ def run_docker_serve(
     config_name: Optional[str] = None,
     config_path: Optional[str] = None,
     exclude_postgres: bool = False,
+    scale: Optional[int] = None,
 ):
     check_docker_compose_version()
     check_set_docker_env_vars(project_name, exclude_postgres)
@@ -160,6 +161,7 @@ def run_docker_serve(
         config_name,
         config_path,
         exclude_postgres,
+        scale,
     )
 
     click.secho("R2R now runs on port 7272 by default!", fg="yellow")
@@ -172,7 +174,7 @@ def run_docker_serve(
     os.system(up_command)
 
 
-def check_llm_reqs(llm_provider, model_provider, include_ollama=False):
+def check_llm_reqs(llm_provider, model_provider):
     providers = {
         "openai": {"env_vars": ["OPENAI_API_KEY"]},
         "anthropic": {"env_vars": ["ANTHROPIC_API_KEY"]},
@@ -212,9 +214,7 @@ def check_llm_reqs(llm_provider, model_provider, include_ollama=False):
                     click.echo("Aborting Docker setup.")
                     sys.exit(1)
 
-    if (
-        llm_provider == "ollama" or model_provider == "ollama"
-    ) and include_ollama:
+    if model_provider == "ollama":
         check_external_ollama()
 
 
@@ -243,7 +243,8 @@ def check_external_ollama(ollama_url="http://localhost:11434/api/version"):
             "Please ensure Ollama is running externally if you've excluded it from Docker and plan on running Local LLMs."
         )
         if not click.confirm(
-            "Do you want to continue without Ollama connection?", default=False
+            "Do you want to continue without confirming an `Ollama` connection?",
+            default=False,
         ):
             click.echo("Aborting Docker setup.")
             sys.exit(1)
@@ -322,6 +323,9 @@ def get_compose_files():
     compose_files = {
         "base": os.path.join(package_dir, "compose.yaml"),
         "full": os.path.join(package_dir, "compose.full.yaml"),
+        "full_scale": os.path.join(
+            package_dir, "compose.full_with_replicas.yaml"
+        ),
     }
 
     for name, path in compose_files.items():
@@ -334,7 +338,7 @@ def get_compose_files():
     return compose_files
 
 
-def find_available_port(start_port):
+def find_available_port(start_port: int):
     port = start_port
     while True:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -358,13 +362,18 @@ def build_docker_command(
     image,
     config_name,
     config_path,
-    exclude_postgres: bool = False,
+    exclude_postgres,
+    scale,
 ):
     if not full:
         base_command = f"docker compose -f {compose_files['base']}"
     else:
-        base_command = f"docker compose -f {compose_files['full']}"
+        if not scale:
+            base_command = f"docker compose -f {compose_files['full']}"
+        else:
+            base_command = f"docker compose -f {compose_files['full_scale']}"
 
+    print("base_command = ", base_command)
     base_command += (
         f" --project-name {project_name or ('r2r-full' if full else 'r2r')}"
     )
@@ -389,6 +398,8 @@ def build_docker_command(
     if not exclude_postgres:
         pull_command = f"{base_command} --profile postgres pull"
         up_command = f"{base_command} --profile postgres up -d"
+        if scale:
+            up_command += f" --scale r2r={scale}"
     else:
         pull_command = f"{base_command} pull"
         up_command = f"{base_command} up -d"

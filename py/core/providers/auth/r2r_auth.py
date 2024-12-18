@@ -1,22 +1,24 @@
 import logging
 import os
 from datetime import datetime, timedelta, timezone
-from typing import Dict
 
 import jwt
-from fastapi import Depends
+from fastapi import Depends, HTTPException
 from fastapi.security import OAuth2PasswordBearer
 
 from core.base import (
     AuthConfig,
     AuthProvider,
+    CollectionResponse,
     CryptoProvider,
-    DatabaseProvider,
+    EmailProvider,
     R2RException,
     Token,
     TokenData,
 )
-from core.base.api.models import UserResponse
+from core.base.api.models import User
+
+from ...database.postgres import PostgresDatabaseProvider
 
 DEFAULT_ACCESS_LIFETIME_IN_MINUTES = 3600
 DEFAULT_REFRESH_LIFETIME_IN_DAYS = 7
@@ -32,12 +34,14 @@ class R2RAuthProvider(AuthProvider):
         self,
         config: AuthConfig,
         crypto_provider: CryptoProvider,
-        db_provider: DatabaseProvider,
+        database_provider: PostgresDatabaseProvider,
+        email_provider: EmailProvider,
     ):
-        super().__init__(config, crypto_provider)
+        super().__init__(
+            config, crypto_provider, database_provider, email_provider
+        )
+        self.database_provider: PostgresDatabaseProvider = database_provider
         logger.debug(f"Initializing R2RAuthProvider with config: {config}")
-        self.crypto_provider = crypto_provider
-        self.db_provider = db_provider
         self.secret_key = (
             config.secret_key or os.getenv("R2R_SECRET_KEY") or DEFAULT_R2R_SK
         )
@@ -54,9 +58,13 @@ class R2RAuthProvider(AuthProvider):
     async def initialize(self):
         try:
             user = await self.register(
-                email=self.admin_email, password=self.admin_password
+                email=self.admin_email,
+                password=self.admin_password,
+                is_superuser=True,
             )
-            await self.db_provider.relational.mark_user_as_superuser(user.id)
+            await self.database_provider.users_handler.mark_user_as_superuser(
+                user.id
+            )
         except R2RException:
             logger.info("Default admin user already exists.")
 
@@ -85,7 +93,9 @@ class R2RAuthProvider(AuthProvider):
     async def decode_token(self, token: str) -> TokenData:
         try:
             # First, check if the token is blacklisted
-            if await self.db_provider.relational.is_token_blacklisted(token):
+            if await self.database_provider.token_handler.is_token_blacklisted(
+                token
+            ):
                 raise R2RException(
                     status_code=401, message="Token has been invalidated"
                 )
@@ -112,9 +122,13 @@ class R2RAuthProvider(AuthProvider):
         except jwt.InvalidTokenError as e:
             raise R2RException(status_code=401, message="Invalid token") from e
 
-    async def user(self, token: str = Depends(oauth2_scheme)) -> UserResponse:
+    async def user(self, token: str = Depends(oauth2_scheme)) -> User:
         token_data = await self.decode_token(token)
-        user = await self.db_provider.relational.get_user_by_email(
+        if not token_data.email:
+            raise R2RException(
+                status_code=401, message="Could not validate credentials"
+            )
+        user = await self.database_provider.users_handler.get_user_by_email(
             token_data.email
         )
         if user is None:
@@ -124,46 +138,63 @@ class R2RAuthProvider(AuthProvider):
         return user
 
     def get_current_active_user(
-        self, current_user: UserResponse = Depends(user)
-    ) -> UserResponse:
+        self, current_user: User = Depends(user)
+    ) -> User:
         if not current_user.is_active:
             raise R2RException(status_code=400, message="Inactive user")
         return current_user
 
-    async def register(self, email: str, password: str) -> Dict[str, str]:
+    async def register(
+        self, email: str, password: str, is_superuser: bool = False
+    ) -> User:
         # Create new user and give them a default collection
-        new_user = await self.db_provider.relational.create_user(
-            email, password
+        new_user = await self.database_provider.users_handler.create_user(
+            email, password, is_superuser
         )
-        default_collection = (
-            await self.db_provider.relational.create_default_collection(
-                new_user.id,
+        default_collection: CollectionResponse = (
+            await self.database_provider.collections_handler.create_collection(
+                owner_id=new_user.id,
             )
         )
+        await self.database_provider.graphs_handler.create(
+            collection_id=default_collection.id,
+            name=default_collection.name,
+            description=default_collection.description,
+        )
 
-        await self.db_provider.relational.add_user_to_collection(
-            new_user.id, default_collection.collection_id
+        await self.database_provider.users_handler.add_user_to_collection(
+            new_user.id, default_collection.id
         )
 
         if self.config.require_email_verification:
-            # Generate verification code and send email
             verification_code = (
                 self.crypto_provider.generate_verification_code()
             )
             expiry = datetime.now(timezone.utc) + timedelta(hours=24)
 
-            await self.db_provider.relational.store_verification_code(
+            await self.database_provider.users_handler.store_verification_code(
                 new_user.id, verification_code, expiry
             )
             new_user.verification_code_expiry = expiry
-            # TODO - Integrate email provider(s)
-            # self.providers.email.send_verification_email(new_user.email, verification_code)
-        else:
-            # Mark user as verified
-            await self.db_provider.relational.store_verification_code(
-                new_user.id, None, None
+
+            # Safely get first name, defaulting to email if name is None
+            first_name = (
+                new_user.name.split(" ")[0]
+                if new_user.name
+                else email.split("@")[0]
             )
-            await self.db_provider.relational.mark_user_as_verified(
+
+            await self.email_provider.send_verification_email(
+                new_user.email, verification_code, {"first_name": first_name}
+            )
+        else:
+            expiry = datetime.now(timezone.utc) + timedelta(hours=366 * 10)
+
+            # Mark user as verified
+            await self.database_provider.users_handler.store_verification_code(
+                new_user.id, str(-1), expiry
+            )
+            await self.database_provider.users_handler.mark_user_as_verified(
                 new_user.id
             )
 
@@ -172,26 +203,28 @@ class R2RAuthProvider(AuthProvider):
     async def verify_email(
         self, email: str, verification_code: str
     ) -> dict[str, str]:
-        user_id = (
-            await self.db_provider.relational.get_user_id_by_verification_code(
-                verification_code
-            )
+        user_id = await self.database_provider.users_handler.get_user_id_by_verification_code(
+            verification_code
         )
         if not user_id:
             raise R2RException(
                 status_code=400, message="Invalid or expired verification code"
             )
-        await self.db_provider.relational.mark_user_as_verified(user_id)
-        await self.db_provider.relational.remove_verification_code(
+        await self.database_provider.users_handler.mark_user_as_verified(
+            user_id
+        )
+        await self.database_provider.users_handler.remove_verification_code(
             verification_code
         )
         return {"message": "Email verified successfully"}
 
-    async def login(self, email: str, password: str) -> Dict[str, Token]:
+    async def login(self, email: str, password: str) -> dict[str, Token]:
         logger = logging.getLogger()
         logger.debug(f"Attempting login for email: {email}")
 
-        user = await self.db_provider.relational.get_user_by_email(email)
+        user = await self.database_provider.users_handler.get_user_by_email(
+            email
+        )
         if not user:
             logger.warning(f"No user found for email: {email}")
             raise R2RException(
@@ -204,8 +237,9 @@ class R2RAuthProvider(AuthProvider):
             logger.error(
                 f"Invalid hashed_password type: {type(user.hashed_password)}"
             )
-            raise R2RException(
-                status_code=500, message="Invalid password hash in database"
+            raise HTTPException(
+                status_code=500,
+                detail="Invalid password hash in database",
             )
 
         try:
@@ -214,8 +248,9 @@ class R2RAuthProvider(AuthProvider):
             )
         except Exception as e:
             logger.error(f"Error during password verification: {str(e)}")
-            raise R2RException(
-                status_code=500, message="Error during password verification"
+            raise HTTPException(
+                status_code=500,
+                detail="Error during password verification",
             ) from e
 
         if not password_verified:
@@ -224,7 +259,7 @@ class R2RAuthProvider(AuthProvider):
                 status_code=401, message="Incorrect email or password"
             )
 
-        if not user.is_verified:
+        if not user.is_verified and self.config.require_email_verification:
             logger.warning(f"Unverified user attempted login: {email}")
             raise R2RException(status_code=401, message="Email not verified")
 
@@ -237,7 +272,7 @@ class R2RAuthProvider(AuthProvider):
 
     async def refresh_access_token(
         self, refresh_token: str
-    ) -> Dict[str, Token]:
+    ) -> dict[str, Token]:
         token_data = await self.decode_token(refresh_token)
         if token_data.token_type != "refresh":
             raise R2RException(
@@ -245,7 +280,9 @@ class R2RAuthProvider(AuthProvider):
             )
 
         # Invalidate the old refresh token and create a new one
-        await self.db_provider.relational.blacklist_token(refresh_token)
+        await self.database_provider.token_handler.blacklist_token(
+            refresh_token
+        )
 
         new_access_token = self.create_access_token(
             data={"sub": token_data.email}
@@ -261,14 +298,15 @@ class R2RAuthProvider(AuthProvider):
         }
 
     async def change_password(
-        self, user: UserResponse, current_password: str, new_password: str
-    ) -> Dict[str, str]:
+        self, user: User, current_password: str, new_password: str
+    ) -> dict[str, str]:
         if not isinstance(user.hashed_password, str):
             logger.error(
                 f"Invalid hashed_password type: {type(user.hashed_password)}"
             )
-            raise R2RException(
-                status_code=500, message="Invalid password hash in database"
+            raise HTTPException(
+                status_code=500,
+                detail="Invalid password hash in database",
             )
 
         if not self.crypto_provider.verify_password(
@@ -281,13 +319,15 @@ class R2RAuthProvider(AuthProvider):
         hashed_new_password = self.crypto_provider.get_password_hash(
             new_password
         )
-        await self.db_provider.relational.update_user_password(
+        await self.database_provider.users_handler.update_user_password(
             user.id, hashed_new_password
         )
         return {"message": "Password changed successfully"}
 
-    async def request_password_reset(self, email: str) -> Dict[str, str]:
-        user = await self.db_provider.relational.get_user_by_email(email)
+    async def request_password_reset(self, email: str) -> dict[str, str]:
+        user = await self.database_provider.users_handler.get_user_by_email(
+            email
+        )
         if not user:
             # To prevent email enumeration, always return a success message
             return {
@@ -296,19 +336,24 @@ class R2RAuthProvider(AuthProvider):
 
         reset_token = self.crypto_provider.generate_verification_code()
         expiry = datetime.now(timezone.utc) + timedelta(hours=1)
-        await self.db_provider.relational.store_reset_token(
+        await self.database_provider.users_handler.store_reset_token(
             user.id, reset_token, expiry
         )
 
-        # TODO: Integrate with email provider to send reset link
-        # self.email_provider.send_reset_email(email, reset_token)
+        # Safely get first name, defaulting to email if name is None
+        first_name = (
+            user.name.split(" ")[0] if user.name else email.split("@")[0]
+        )
+        await self.email_provider.send_password_reset_email(
+            email, reset_token, {"first_name": first_name}
+        )
 
         return {"message": "If the email exists, a reset link has been sent"}
 
     async def confirm_password_reset(
         self, reset_token: str, new_password: str
-    ) -> Dict[str, str]:
-        user_id = await self.db_provider.relational.get_user_id_by_reset_token(
+    ) -> dict[str, str]:
+        user_id = await self.database_provider.users_handler.get_user_id_by_reset_token(
             reset_token
         )
         if not user_id:
@@ -319,16 +364,49 @@ class R2RAuthProvider(AuthProvider):
         hashed_new_password = self.crypto_provider.get_password_hash(
             new_password
         )
-        await self.db_provider.relational.update_user_password(
+        await self.database_provider.users_handler.update_user_password(
             user_id, hashed_new_password
         )
-        await self.db_provider.relational.remove_reset_token(user_id)
+        await self.database_provider.users_handler.remove_reset_token(user_id)
         return {"message": "Password reset successfully"}
 
-    async def logout(self, token: str) -> Dict[str, str]:
+    async def logout(self, token: str) -> dict[str, str]:
         # Add the token to a blacklist
-        await self.db_provider.relational.blacklist_token(token)
+        await self.database_provider.token_handler.blacklist_token(token)
         return {"message": "Logged out successfully"}
 
     async def clean_expired_blacklisted_tokens(self):
-        await self.db_provider.relational.clean_expired_blacklisted_tokens()
+        await self.database_provider.token_handler.clean_expired_blacklisted_tokens()
+
+    async def send_reset_email(self, email: str) -> dict:
+        user = await self.database_provider.users_handler.get_user_by_email(
+            email
+        )
+        if not user:
+            raise R2RException(status_code=404, message="User not found")
+
+        # Generate new verification code
+        verification_code = self.crypto_provider.generate_verification_code()
+        expiry = datetime.now(timezone.utc) + timedelta(hours=24)
+
+        # Store the verification code
+        await self.database_provider.users_handler.store_verification_code(
+            user.id,
+            verification_code,
+            expiry,
+        )
+
+        # Safely get first name, defaulting to email if name is None
+        first_name = (
+            user.name.split(" ")[0] if user.name else email.split("@")[0]
+        )
+        # Send verification email
+        await self.email_provider.send_verification_email(
+            email, verification_code, {"first_name": first_name}
+        )
+
+        return {
+            "verification_code": verification_code,
+            "expiry": expiry,
+            "message": f"Verification email sent successfully to {email}",
+        }

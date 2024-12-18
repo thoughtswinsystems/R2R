@@ -2,14 +2,7 @@ import logging
 from typing import Any, AsyncGenerator, Optional
 from uuid import UUID
 
-from core.base import (
-    AsyncState,
-    DatabaseProvider,
-    PipeType,
-    R2RLoggingProvider,
-    StorageResult,
-    VectorEntry,
-)
+from core.base import AsyncState, DatabaseProvider, StorageResult, VectorEntry
 from core.base.pipes.base_pipe import AsyncPipe
 
 logger = logging.getLogger()
@@ -24,8 +17,6 @@ class VectorStoragePipe(AsyncPipe[StorageResult]):
         database_provider: DatabaseProvider,
         config: AsyncPipe.PipeConfig,
         storage_batch_size: int = 128,
-        pipe_logger: Optional[R2RLoggingProvider] = None,
-        type: PipeType = PipeType.INGESTOR,
         *args,
         **kwargs,
     ):
@@ -34,8 +25,6 @@ class VectorStoragePipe(AsyncPipe[StorageResult]):
         """
         super().__init__(
             config,
-            type,
-            pipe_logger,
             *args,
             **kwargs,
         )
@@ -51,7 +40,9 @@ class VectorStoragePipe(AsyncPipe[StorageResult]):
         """
 
         try:
-            self.database_provider.vector.upsert_entries(vector_entries)
+            await self.database_provider.chunks_handler.upsert_entries(
+                vector_entries
+            )
         except Exception as e:
             error_message = (
                 f"Failed to store vector entries in the database: {e}"

@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any, Optional, Type
+from typing import Any, Optional, Sequence, Type
 
 from pydantic import BaseModel
 
@@ -8,6 +8,9 @@ from ..abstractions import R2RSerializable
 
 class AppConfig(R2RSerializable):
     project_name: Optional[str] = None
+    default_max_documents_per_user: Optional[int] = 100
+    default_max_chunks_per_user: Optional[int] = 100_000
+    default_max_collections_per_user: Optional[int] = 10
 
     @classmethod
     def create(cls, *args, **kwargs):
@@ -23,6 +26,7 @@ class ProviderConfig(BaseModel, ABC):
     provider: Optional[str] = None
 
     class Config:
+        populate_by_name = True
         arbitrary_types_allowed = True
         ignore_extra = True
 

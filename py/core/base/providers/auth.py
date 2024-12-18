@@ -1,17 +1,22 @@
 import logging
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from fastapi import Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from ...utils import generate_user_id
 from ..abstractions import R2RException, Token, TokenData
-from ..api.models import UserResponse
+from ..api.models import User
 from .base import Provider, ProviderConfig
 from .crypto import CryptoProvider
 
+# from .database import DatabaseProvider
+from .email import EmailProvider
+
 logger = logging.getLogger()
+
+if TYPE_CHECKING:
+    from core.database import PostgresDatabaseProvider
 
 
 class AuthConfig(ProviderConfig):
@@ -33,8 +38,17 @@ class AuthConfig(ProviderConfig):
 
 class AuthProvider(Provider, ABC):
     security = HTTPBearer(auto_error=False)
+    crypto_provider: CryptoProvider
+    email_provider: EmailProvider
+    database_provider: "PostgresDatabaseProvider"
 
-    def __init__(self, config: AuthConfig, crypto_provider: CryptoProvider):
+    def __init__(
+        self,
+        config: AuthConfig,
+        crypto_provider: CryptoProvider,
+        database_provider: "PostgresDatabaseProvider",
+        email_provider: EmailProvider,
+    ):
         if not isinstance(config, AuthConfig):
             raise ValueError(
                 "AuthProvider must be initialized with an AuthConfig"
@@ -43,19 +57,17 @@ class AuthProvider(Provider, ABC):
         self.admin_email = config.default_admin_email
         self.admin_password = config.default_admin_password
         self.crypto_provider = crypto_provider
+        self.database_provider = database_provider
+        self.email_provider = email_provider
         super().__init__(config)
         self.config: AuthConfig = config  # for type hinting
+        self.database_provider: "PostgresDatabaseProvider" = (
+            database_provider  # for type hinting
+        )
 
-    def _get_default_admin_user(self) -> UserResponse:
-        return UserResponse(
-            id=generate_user_id(self.admin_email),
-            email=self.admin_email,
-            hashed_password=self.crypto_provider.get_password_hash(
-                self.admin_password
-            ),
-            is_superuser=True,
-            is_active=True,
-            is_verified=True,
+    async def _get_default_admin_user(self) -> User:
+        return await self.database_provider.users_handler.get_user_by_email(
+            self.admin_email
         )
 
     @abstractmethod
@@ -71,17 +83,15 @@ class AuthProvider(Provider, ABC):
         pass
 
     @abstractmethod
-    async def user(self, token: str) -> UserResponse:
+    async def user(self, token: str) -> User:
         pass
 
     @abstractmethod
-    def get_current_active_user(
-        self, current_user: UserResponse
-    ) -> UserResponse:
+    def get_current_active_user(self, current_user: User) -> User:
         pass
 
     @abstractmethod
-    async def register(self, email: str, password: str) -> dict[str, str]:
+    async def register(self, email: str, password: str) -> User:
         pass
 
     @abstractmethod
@@ -102,9 +112,9 @@ class AuthProvider(Provider, ABC):
 
     async def auth_wrapper(
         self, auth: Optional[HTTPAuthorizationCredentials] = Security(security)
-    ) -> UserResponse:
+    ) -> User:
         if not self.config.require_authentication and auth is None:
-            return self._get_default_admin_user()
+            return await self._get_default_admin_user()
 
         if auth is None:
             raise R2RException(
@@ -117,12 +127,12 @@ class AuthProvider(Provider, ABC):
         except Exception as e:
             raise R2RException(
                 message=f"Error '{e}' occurred during authentication.",
-                status_code=401,
+                status_code=404,
             )
 
     @abstractmethod
     async def change_password(
-        self, user: UserResponse, current_password: str, new_password: str
+        self, user: User, current_password: str, new_password: str
     ) -> dict[str, str]:
         pass
 
@@ -138,4 +148,8 @@ class AuthProvider(Provider, ABC):
 
     @abstractmethod
     async def logout(self, token: str) -> dict[str, str]:
+        pass
+
+    @abstractmethod
+    async def send_reset_email(self, email: str) -> dict[str, str]:
         pass

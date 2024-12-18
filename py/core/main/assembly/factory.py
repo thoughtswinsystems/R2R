@@ -1,37 +1,49 @@
 import logging
 import os
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 from core.agent import R2RRAGAgent, R2RStreamingRAGAgent
 from core.base import (
     AsyncPipe,
     AuthConfig,
-    AuthProvider,
     CompletionConfig,
     CompletionProvider,
     CryptoConfig,
-    CryptoProvider,
     DatabaseConfig,
-    DatabaseProvider,
+    EmailConfig,
     EmbeddingConfig,
     EmbeddingProvider,
-    FileConfig,
-    FileProvider,
     IngestionConfig,
-    IngestionProvider,
-    KGProvider,
     OrchestrationConfig,
-    PromptConfig,
-    PromptProvider,
-    R2RLoggingProvider,
 )
 from core.pipelines import RAGPipeline, SearchPipeline
 from core.pipes import GeneratorPipe, MultiSearchPipe, SearchPipe
+from core.providers.email.sendgrid import SendGridEmailProvider
 
 from ..abstractions import R2RAgents, R2RPipelines, R2RPipes, R2RProviders
 from ..config import R2RConfig
 
 logger = logging.getLogger()
+from core.database import PostgresDatabaseProvider
+from core.providers import (  # PostgresDatabaseProvider,
+    AsyncSMTPEmailProvider,
+    BCryptConfig,
+    BCryptProvider,
+    ConsoleMockEmailProvider,
+    HatchetOrchestrationProvider,
+    LiteLLMCompletionProvider,
+    LiteLLMEmbeddingProvider,
+    OllamaEmbeddingProvider,
+    OpenAICompletionProvider,
+    OpenAIEmbeddingProvider,
+    R2RAuthProvider,
+    R2RIngestionConfig,
+    R2RIngestionProvider,
+    SimpleOrchestrationProvider,
+    SupabaseAuthProvider,
+    UnstructuredIngestionConfig,
+    UnstructuredIngestionProvider,
+)
 
 
 class R2RProviderFactory:
@@ -41,24 +53,26 @@ class R2RProviderFactory:
     @staticmethod
     async def create_auth_provider(
         auth_config: AuthConfig,
-        db_provider: DatabaseProvider,
-        crypto_provider: CryptoProvider,
+        crypto_provider: BCryptProvider,
+        database_provider: PostgresDatabaseProvider,
+        email_provider: Union[
+            AsyncSMTPEmailProvider,
+            ConsoleMockEmailProvider,
+            SendGridEmailProvider,
+        ],
         *args,
         **kwargs,
-    ) -> AuthProvider:
+    ) -> Union[R2RAuthProvider, SupabaseAuthProvider]:
         if auth_config.provider == "r2r":
-            from core.providers import R2RAuthProvider
 
             r2r_auth = R2RAuthProvider(
-                auth_config, crypto_provider, db_provider
+                auth_config, crypto_provider, database_provider, email_provider
             )
             await r2r_auth.initialize()
             return r2r_auth
         elif auth_config.provider == "supabase":
-            from core.providers import SupabaseAuthProvider
-
             return SupabaseAuthProvider(
-                auth_config, crypto_provider, db_provider
+                auth_config, crypto_provider, database_provider, email_provider
             )
         else:
             raise ValueError(
@@ -68,10 +82,8 @@ class R2RProviderFactory:
     @staticmethod
     def create_crypto_provider(
         crypto_config: CryptoConfig, *args, **kwargs
-    ) -> CryptoProvider:
+    ) -> BCryptProvider:
         if crypto_config.provider == "bcrypt":
-            from core.providers.crypto import BCryptConfig, BCryptProvider
-
             return BCryptProvider(BCryptConfig(**crypto_config.dict()))
         else:
             raise ValueError(
@@ -80,8 +92,14 @@ class R2RProviderFactory:
 
     @staticmethod
     def create_ingestion_provider(
-        ingestion_config: IngestionConfig, *args, **kwargs
-    ) -> IngestionProvider:
+        ingestion_config: IngestionConfig,
+        database_provider: PostgresDatabaseProvider,
+        llm_provider: Union[
+            LiteLLMCompletionProvider, OpenAICompletionProvider
+        ],
+        *args,
+        **kwargs,
+    ) -> Union[R2RIngestionProvider, UnstructuredIngestionProvider]:
 
         config_dict = (
             ingestion_config.model_dump()
@@ -92,27 +110,22 @@ class R2RProviderFactory:
         extra_fields = config_dict.pop("extra_fields", {})
 
         if config_dict["provider"] == "r2r":
-            from core.providers import R2RIngestionConfig, R2RIngestionProvider
-
             r2r_ingestion_config = R2RIngestionConfig(
                 **config_dict, **extra_fields
             )
-            return R2RIngestionProvider(r2r_ingestion_config)
+            return R2RIngestionProvider(
+                r2r_ingestion_config, database_provider, llm_provider
+            )
         elif config_dict["provider"] in [
             "unstructured_local",
             "unstructured_api",
         ]:
-            from core.providers import (
-                UnstructuredIngestionConfig,
-                UnstructuredIngestionProvider,
-            )
-
             unstructured_ingestion_config = UnstructuredIngestionConfig(
                 **config_dict, **extra_fields
             )
 
             return UnstructuredIngestionProvider(
-                unstructured_ingestion_config,
+                unstructured_ingestion_config, database_provider, llm_provider
             )
         else:
             raise ValueError(
@@ -122,10 +135,8 @@ class R2RProviderFactory:
     @staticmethod
     def create_orchestration_provider(
         config: OrchestrationConfig, *args, **kwargs
-    ):
+    ) -> Union[HatchetOrchestrationProvider, SimpleOrchestrationProvider]:
         if config.provider == "hatchet":
-            from core.providers import HatchetOrchestrationProvider
-
             orchestration_provider = HatchetOrchestrationProvider(config)
             orchestration_provider.get_worker("r2r-worker")
             return orchestration_provider
@@ -133,30 +144,33 @@ class R2RProviderFactory:
             from core.providers import SimpleOrchestrationProvider
 
             return SimpleOrchestrationProvider(config)
+        else:
+            raise ValueError(
+                f"Orchestration provider {config.provider} not supported"
+            )
 
     async def create_database_provider(
         self,
         db_config: DatabaseConfig,
-        crypto_provider: CryptoProvider,
+        crypto_provider: BCryptProvider,
         *args,
         **kwargs,
-    ) -> DatabaseProvider:
-        database_provider: Optional[DatabaseProvider] = None
+    ) -> PostgresDatabaseProvider:
         if not self.config.embedding.base_dimension:
             raise ValueError(
                 "Embedding config must have a base dimension to initialize database."
             )
 
-        vector_db_dimension = self.config.embedding.base_dimension
+        dimension = self.config.embedding.base_dimension
         quantization_type = (
             self.config.embedding.quantization_settings.quantization_type
         )
         if db_config.provider == "postgres":
-            from core.providers import PostgresDBProvider
+            from ...database.postgres import PostgresDatabaseProvider
 
-            database_provider = PostgresDBProvider(
+            database_provider = PostgresDatabaseProvider(
                 db_config,
-                vector_db_dimension,
+                dimension,
                 crypto_provider=crypto_provider,
                 quantization_type=quantization_type,
             )
@@ -170,7 +184,11 @@ class R2RProviderFactory:
     @staticmethod
     def create_embedding_provider(
         embedding: EmbeddingConfig, *args, **kwargs
-    ) -> EmbeddingProvider:
+    ) -> Union[
+        LiteLLMEmbeddingProvider,
+        OllamaEmbeddingProvider,
+        OpenAIEmbeddingProvider,
+    ]:
         embedding_provider: Optional[EmbeddingProvider] = None
 
         if embedding.provider == "openai":
@@ -192,9 +210,6 @@ class R2RProviderFactory:
 
             embedding_provider = OllamaEmbeddingProvider(embedding)
 
-        elif embedding is None:
-            embedding_provider = None
-
         else:
             raise ValueError(
                 f"Embedding provider {embedding.provider} not supported"
@@ -203,38 +218,14 @@ class R2RProviderFactory:
         return embedding_provider
 
     @staticmethod
-    async def create_file_provider(
-        file_config: FileConfig,
-        db_provider: Any,
-        *args,
-        **kwargs,
-    ) -> FileProvider:
-        file_provider: Optional[FileProvider] = None
-        if file_config.provider == "postgres":
-            from core.providers import PostgresFileProvider
-
-            file_provider = PostgresFileProvider(file_config, db_provider)
-            await file_provider.initialize()
-        else:
-            raise ValueError(
-                f"File provider {file_config.provider} not supported."
-            )
-
-        return file_provider
-
-    @staticmethod
     def create_llm_provider(
         llm_config: CompletionConfig, *args, **kwargs
-    ) -> CompletionProvider:
+    ) -> Union[LiteLLMCompletionProvider, OpenAICompletionProvider]:
         llm_provider: Optional[CompletionProvider] = None
         if llm_config.provider == "openai":
-            from core.providers import OpenAICompletionProvider
-
             llm_provider = OpenAICompletionProvider(llm_config)
         elif llm_config.provider == "litellm":
-            from core.providers import LiteCompletionProvider
-
-            llm_provider = LiteCompletionProvider(llm_config)
+            llm_provider = LiteLLMCompletionProvider(llm_config)
         else:
             raise ValueError(
                 f"Language model provider {llm_config.provider} not supported"
@@ -244,56 +235,55 @@ class R2RProviderFactory:
         return llm_provider
 
     @staticmethod
-    async def create_prompt_provider(
-        prompt_config: PromptConfig,
-        db_provider: DatabaseProvider,
-        *args,
-        **kwargs,
-    ) -> PromptProvider:
-        prompt_provider = None
-
-        if prompt_config.provider != "r2r":
+    async def create_email_provider(
+        email_config: Optional[EmailConfig] = None, *args, **kwargs
+    ) -> Union[
+        AsyncSMTPEmailProvider, ConsoleMockEmailProvider, SendGridEmailProvider
+    ]:
+        """Creates an email provider based on configuration."""
+        if not email_config:
             raise ValueError(
-                f"Prompt provider {prompt_config.provider} not supported"
+                f"No email configuration provided for email provider, please add `[email]` to your `r2r.toml`."
             )
-        from core.providers import R2RPromptProvider
 
-        prompt_provider = R2RPromptProvider(prompt_config, db_provider)
-        await prompt_provider.initialize()
-
-        return prompt_provider
-
-    @staticmethod
-    async def create_kg_provider(
-        kg_config, database_provider, embedding_provider, *args, **kwargs
-    ):
-        if kg_config.provider == "postgres":
-            from core.providers import PostgresKGProvider
-
-            provider = PostgresKGProvider(
-                kg_config, database_provider, embedding_provider
-            )
-            await provider.initialize()
-            return provider
-
-        elif kg_config.provider is None:
-            return None
+        if email_config.provider == "smtp":
+            return AsyncSMTPEmailProvider(email_config)
+        elif email_config.provider == "console_mock":
+            return ConsoleMockEmailProvider(email_config)
+        elif email_config.provider == "sendgrid":
+            return SendGridEmailProvider(email_config)
         else:
             raise ValueError(
-                f"KG provider {kg_config.provider} not supported."
+                f"Email provider {email_config.provider} not supported."
             )
 
     async def create_providers(
         self,
-        auth_provider_override: Optional[AuthProvider] = None,
-        crypto_provider_override: Optional[CryptoProvider] = None,
-        database_provider_override: Optional[DatabaseProvider] = None,
-        embedding_provider_override: Optional[EmbeddingProvider] = None,
-        file_provider_override: Optional[FileProvider] = None,
-        ingestion_provider_override: Optional[IngestionProvider] = None,
-        kg_provider_override: Optional[KGProvider] = None,
-        llm_provider_override: Optional[CompletionProvider] = None,
-        prompt_provider_override: Optional[PromptProvider] = None,
+        auth_provider_override: Optional[
+            Union[R2RAuthProvider, SupabaseAuthProvider]
+        ] = None,
+        crypto_provider_override: Optional[BCryptProvider] = None,
+        database_provider_override: Optional[PostgresDatabaseProvider] = None,
+        email_provider_override: Optional[
+            Union[
+                AsyncSMTPEmailProvider,
+                ConsoleMockEmailProvider,
+                SendGridEmailProvider,
+            ]
+        ] = None,
+        embedding_provider_override: Optional[
+            Union[
+                LiteLLMEmbeddingProvider,
+                OpenAIEmbeddingProvider,
+                OllamaEmbeddingProvider,
+            ]
+        ] = None,
+        ingestion_provider_override: Optional[
+            Union[R2RIngestionProvider, UnstructuredIngestionProvider]
+        ] = None,
+        llm_provider_override: Optional[
+            Union[OpenAICompletionProvider, LiteLLMCompletionProvider]
+        ] = None,
         orchestration_provider_override: Optional[Any] = None,
         *args,
         **kwargs,
@@ -304,21 +294,14 @@ class R2RProviderFactory:
                 self.config.embedding, *args, **kwargs
             )
         )
-        ingestion_provider = (
-            ingestion_provider_override
-            or self.create_ingestion_provider(
-                self.config.ingestion, *args, **kwargs
-            )
-        )
-
         llm_provider = llm_provider_override or self.create_llm_provider(
             self.config.completion, *args, **kwargs
         )
+
         crypto_provider = (
             crypto_provider_override
             or self.create_crypto_provider(self.config.crypto, *args, **kwargs)
         )
-
         database_provider = (
             database_provider_override
             or await self.create_database_provider(
@@ -326,34 +309,34 @@ class R2RProviderFactory:
             )
         )
 
-        kg_provider = kg_provider_override or await self.create_kg_provider(
-            self.config.kg,
-            database_provider,
-            embedding_provider,
-            *args,
-            **kwargs,
+        ingestion_provider = (
+            ingestion_provider_override
+            or self.create_ingestion_provider(
+                self.config.ingestion,
+                database_provider,
+                llm_provider,
+                *args,
+                **kwargs,
+            )
+        )
+
+        email_provider = (
+            email_provider_override
+            or await self.create_email_provider(
+                self.config.email, crypto_provider, *args, **kwargs
+            )
         )
 
         auth_provider = (
             auth_provider_override
             or await self.create_auth_provider(
                 self.config.auth,
-                database_provider,
                 crypto_provider,
+                database_provider,
+                email_provider,
                 *args,
                 **kwargs,
             )
-        )
-
-        prompt_provider = (
-            prompt_provider_override
-            or await self.create_prompt_provider(
-                self.config.prompt, database_provider, *args, **kwargs
-            )
-        )
-
-        file_provider = file_provider_override or await self.create_file_provider(
-            self.config.file, database_provider, *args, **kwargs  # type: ignore
         )
 
         orchestration_provider = (
@@ -367,10 +350,8 @@ class R2RProviderFactory:
             embedding=embedding_provider,
             ingestion=ingestion_provider,
             llm=llm_provider,
-            prompt=prompt_provider,
-            kg=kg_provider,
+            email=email_provider,
             orchestration=orchestration_provider,
-            file=file_provider,
         )
 
 
@@ -383,7 +364,7 @@ class R2RPipeFactory:
         self,
         parsing_pipe_override: Optional[AsyncPipe] = None,
         embedding_pipe_override: Optional[AsyncPipe] = None,
-        kg_triples_extraction_pipe_override: Optional[AsyncPipe] = None,
+        kg_relationships_extraction_pipe_override: Optional[AsyncPipe] = None,
         kg_storage_pipe_override: Optional[AsyncPipe] = None,
         kg_search_pipe_override: Optional[AsyncPipe] = None,
         vector_storage_pipe_override: Optional[AsyncPipe] = None,
@@ -392,6 +373,8 @@ class R2RPipeFactory:
         streaming_rag_pipe_override: Optional[AsyncPipe] = None,
         kg_entity_description_pipe: Optional[AsyncPipe] = None,
         kg_clustering_pipe: Optional[AsyncPipe] = None,
+        kg_entity_deduplication_pipe: Optional[AsyncPipe] = None,
+        kg_entity_deduplication_summary_pipe: Optional[AsyncPipe] = None,
         kg_community_summary_pipe: Optional[AsyncPipe] = None,
         *args,
         **kwargs,
@@ -405,8 +388,8 @@ class R2RPipeFactory:
             ),
             embedding_pipe=embedding_pipe_override
             or self.create_embedding_pipe(*args, **kwargs),
-            kg_triples_extraction_pipe=kg_triples_extraction_pipe_override
-            or self.create_kg_triples_extraction_pipe(*args, **kwargs),
+            kg_relationships_extraction_pipe=kg_relationships_extraction_pipe_override
+            or self.create_kg_relationships_extraction_pipe(*args, **kwargs),
             kg_storage_pipe=kg_storage_pipe_override
             or self.create_kg_storage_pipe(*args, **kwargs),
             vector_storage_pipe=vector_storage_pipe_override
@@ -423,6 +406,12 @@ class R2RPipeFactory:
             or self.create_kg_entity_description_pipe(*args, **kwargs),
             kg_clustering_pipe=kg_clustering_pipe
             or self.create_kg_clustering_pipe(*args, **kwargs),
+            kg_entity_deduplication_pipe=kg_entity_deduplication_pipe
+            or self.create_kg_entity_deduplication_pipe(*args, **kwargs),
+            kg_entity_deduplication_summary_pipe=kg_entity_deduplication_summary_pipe
+            or self.create_kg_entity_deduplication_summary_pipe(
+                *args, **kwargs
+            ),
             kg_community_summary_pipe=kg_community_summary_pipe
             or self.create_kg_community_summary_pipe(*args, **kwargs),
         )
@@ -432,7 +421,7 @@ class R2RPipeFactory:
 
         return ParsingPipe(
             ingestion_provider=self.providers.ingestion,
-            file_provider=self.providers.file,
+            database_provider=self.providers.database,
             config=AsyncPipe.PipeConfig(name="parsing_pipe"),
         )
 
@@ -489,7 +478,7 @@ class R2RPipeFactory:
 
         query_transform_pipe = QueryTransformPipe(
             llm_provider=self.providers.llm,
-            prompt_provider=self.providers.prompt,
+            database_provider=self.providers.database,
             config=QueryTransformPipe.QueryTransformConfig(
                 name="multi_query_transform",
                 task_prompt=expansion_technique,
@@ -536,41 +525,31 @@ class R2RPipeFactory:
             config=AsyncPipe.PipeConfig(name="routing_search_pipe"),
         )
 
-    def create_kg_triples_extraction_pipe(self, *args, **kwargs) -> Any:
-        if self.config.kg.provider is None:
-            return None
+    def create_kg_relationships_extraction_pipe(self, *args, **kwargs) -> Any:
+        from core.pipes import KGExtractionPipe
 
-        from core.pipes import KGTriplesExtractionPipe
-
-        return KGTriplesExtractionPipe(
-            kg_provider=self.providers.kg,
+        return KGExtractionPipe(
             llm_provider=self.providers.llm,
             database_provider=self.providers.database,
-            prompt_provider=self.providers.prompt,
-            config=AsyncPipe.PipeConfig(name="kg_triples_extraction_pipe"),
+            config=AsyncPipe.PipeConfig(
+                name="kg_relationships_extraction_pipe"
+            ),
         )
 
     def create_kg_storage_pipe(self, *args, **kwargs) -> Any:
-        if self.config.kg.provider is None:
-            return None
-
         from core.pipes import KGStoragePipe
 
         return KGStoragePipe(
-            kg_provider=self.providers.kg,
+            database_provider=self.providers.database,
             config=AsyncPipe.PipeConfig(name="kg_storage_pipe"),
         )
 
     def create_kg_search_pipe(self, *args, **kwargs) -> Any:
-        if self.config.kg.provider is None:
-            return None
-
         from core.pipes import KGSearchSearchPipe
 
         return KGSearchSearchPipe(
-            kg_provider=self.providers.kg,
+            database_provider=self.providers.database,
             llm_provider=self.providers.llm,
-            prompt_provider=self.providers.prompt,
             embedding_provider=self.providers.embedding,
             config=GeneratorPipe.PipeConfig(
                 name="kg_rag_pipe", task_prompt="kg_search"
@@ -583,7 +562,7 @@ class R2RPipeFactory:
 
             return StreamingSearchRAGPipe(
                 llm_provider=self.providers.llm,
-                prompt_provider=self.providers.prompt,
+                database_provider=self.providers.database,
                 config=GeneratorPipe.PipeConfig(
                     name="streaming_rag_pipe", task_prompt="default_rag"
                 ),
@@ -593,7 +572,7 @@ class R2RPipeFactory:
 
             return SearchRAGPipe(
                 llm_provider=self.providers.llm,
-                prompt_provider=self.providers.prompt,
+                database_provider=self.providers.database,
                 config=GeneratorPipe.PipeConfig(
                     name="search_rag_pipe", task_prompt="default_rag"
                 ),
@@ -603,9 +582,8 @@ class R2RPipeFactory:
         from core.pipes import KGEntityDescriptionPipe
 
         return KGEntityDescriptionPipe(
-            kg_provider=self.providers.kg,
+            database_provider=self.providers.database,
             llm_provider=self.providers.llm,
-            prompt_provider=self.providers.prompt,
             embedding_provider=self.providers.embedding,
             config=AsyncPipe.PipeConfig(name="kg_entity_description_pipe"),
         )
@@ -614,28 +592,63 @@ class R2RPipeFactory:
         from core.pipes import KGClusteringPipe
 
         return KGClusteringPipe(
-            kg_provider=self.providers.kg,
+            database_provider=self.providers.database,
             llm_provider=self.providers.llm,
-            prompt_provider=self.providers.prompt,
             embedding_provider=self.providers.embedding,
             config=AsyncPipe.PipeConfig(name="kg_clustering_pipe"),
+        )
+
+    def create_kg_deduplication_summary_pipe(self, *args, **kwargs) -> Any:
+        from core.pipes import KGEntityDeduplicationSummaryPipe
+
+        return KGEntityDeduplicationSummaryPipe(
+            database_provider=self.providers.database,
+            llm_provider=self.providers.llm,
+            embedding_provider=self.providers.embedding,
+            config=AsyncPipe.PipeConfig(name="kg_deduplication_summary_pipe"),
         )
 
     def create_kg_community_summary_pipe(self, *args, **kwargs) -> Any:
         from core.pipes import KGCommunitySummaryPipe
 
         return KGCommunitySummaryPipe(
-            kg_provider=self.providers.kg,
+            database_provider=self.providers.database,
             llm_provider=self.providers.llm,
-            prompt_provider=self.providers.prompt,
             embedding_provider=self.providers.embedding,
             config=AsyncPipe.PipeConfig(name="kg_community_summary_pipe"),
         )
 
+    def create_kg_entity_deduplication_pipe(self, *args, **kwargs) -> Any:
+        from core.pipes import KGEntityDeduplicationPipe
+
+        return KGEntityDeduplicationPipe(
+            database_provider=self.providers.database,
+            llm_provider=self.providers.llm,
+            embedding_provider=self.providers.embedding,
+            config=AsyncPipe.PipeConfig(name="kg_entity_deduplication_pipe"),
+        )
+
+    def create_kg_entity_deduplication_summary_pipe(
+        self, *args, **kwargs
+    ) -> Any:
+        from core.pipes import KGEntityDeduplicationSummaryPipe
+
+        return KGEntityDeduplicationSummaryPipe(
+            database_provider=self.providers.database,
+            llm_provider=self.providers.llm,
+            embedding_provider=self.providers.embedding,
+            config=AsyncPipe.PipeConfig(
+                name="kg_entity_deduplication_summary_pipe"
+            ),
+        )
+
 
 class R2RPipelineFactory:
-    def __init__(self, config: R2RConfig, pipes: R2RPipes):
+    def __init__(
+        self, config: R2RConfig, providers: R2RProviders, pipes: R2RPipes
+    ):
         self.config = config
+        self.providers = providers
         self.pipes = pipes
 
     def create_search_pipeline(self, *args, **kwargs) -> SearchPipeline:
@@ -650,11 +663,8 @@ class R2RPipelineFactory:
             search_pipeline.add_pipe(
                 self.pipes.vector_search_pipe, vector_search_pipe=True
             )
-
-        # Add KG pipes if provider is set
-        if self.config.kg.provider is not None:
             search_pipeline.add_pipe(
-                self.pipes.kg_search_pipe, kg_triples_extraction_pipe=True
+                self.pipes.kg_search_pipe, kg_search_pipe=True
             )
 
         return search_pipeline
@@ -683,10 +693,6 @@ class R2RPipelineFactory:
         *args,
         **kwargs,
     ) -> R2RPipelines:
-        try:
-            self.configure_logging()
-        except Exception as e:
-            logger.warning(f"Error configuring logging: {e}")
         search_pipeline = search_pipeline or self.create_search_pipeline(
             *args, **kwargs
         )
@@ -707,9 +713,6 @@ class R2RPipelineFactory:
                 **kwargs,
             ),
         )
-
-    def configure_logging(self):
-        R2RLoggingProvider.configure(self.config.logging)
 
 
 class R2RAgentFactory:
@@ -740,26 +743,26 @@ class R2RAgentFactory:
     def create_streaming_rag_agent(
         self, *args, **kwargs
     ) -> R2RStreamingRAGAgent:
-        if not self.providers.llm or not self.providers.prompt:
+        if not self.providers.llm or not self.providers.database:
             raise ValueError(
-                "LLM and Prompt providers are required for RAG Agent"
+                "LLM and database providers are required for RAG Agent"
             )
 
         return R2RStreamingRAGAgent(
+            database_provider=self.providers.database,
             llm_provider=self.providers.llm,
-            prompt_provider=self.providers.prompt,
             config=self.config.agent,
             search_pipeline=self.pipelines.search_pipeline,
         )
 
     def create_rag_agent(self, *args, **kwargs) -> R2RRAGAgent:
-        if not self.providers.llm or not self.providers.prompt:
+        if not self.providers.llm or not self.providers.database:
             raise ValueError(
-                "LLM and Prompt providers are required for RAG Agent"
+                "LLM and database providers are required for RAG Agent"
             )
         return R2RRAGAgent(
+            database_provider=self.providers.database,
             llm_provider=self.providers.llm,
-            prompt_provider=self.providers.prompt,
             config=self.config.agent,
             search_pipeline=self.pipelines.search_pipeline,
         )

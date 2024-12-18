@@ -1,10 +1,18 @@
-import axios, {
-  AxiosInstance,
-  Method,
-  AxiosResponse,
-  AxiosRequestConfig,
-} from "axios";
+import axios, { Method } from "axios";
 import FormData from "form-data";
+
+import { BaseClient } from "./baseClient";
+
+import { ChunksClient } from "./v3/clients/chunks";
+import { CollectionsClient } from "./v3/clients/collections";
+import { ConversationsClient } from "./v3/clients/conversations";
+import { DocumentsClient } from "./v3/clients/documents";
+import { GraphsClient } from "./v3/clients/graphs";
+import { IndiciesClient } from "./v3/clients/indices";
+import { PromptsClient } from "./v3/clients/prompts";
+import { RetrievalClient } from "./v3/clients/retrieval";
+import { SystemClient } from "./v3/clients/system";
+import { UsersClient } from "./v3/clients/users";
 
 let fs: any;
 if (typeof window === "undefined") {
@@ -19,57 +27,36 @@ import {
   TokenInfo,
   Message,
   RefreshTokenResponse,
-  VectorSearchSettings,
-  KGSearchSettings,
-  GenerationConfig,
+  KGRunType,
+  KGEntityDeduplicationSettings,
   RawChunk,
 } from "./models";
 
-function handleRequestError(response: AxiosResponse): void {
-  if (response.status < 400) {
-    return;
-  }
+export class r2rClient extends BaseClient {
+  public readonly chunks: ChunksClient;
+  public readonly collections: CollectionsClient;
+  public readonly conversations: ConversationsClient;
+  public readonly documents: DocumentsClient;
+  public readonly graphs: GraphsClient;
+  public readonly indices: IndiciesClient;
+  public readonly prompts: PromptsClient;
+  public readonly retrieval: RetrievalClient;
+  public readonly system: SystemClient;
+  public readonly users: UsersClient;
 
-  let message: string;
-  const errorContent = response.data;
+  constructor(baseURL: string, anonymousTelemetry = true) {
+    super(baseURL, "", anonymousTelemetry);
 
-  if (
-    typeof errorContent === "object" &&
-    errorContent !== null &&
-    "detail" in errorContent
-  ) {
-    const { detail } = errorContent;
-    if (typeof detail === "object" && detail !== null) {
-      message = (detail as { message?: string }).message || response.statusText;
-    } else {
-      message = String(detail);
-    }
-  } else {
-    message = String(errorContent);
-  }
-
-  throw new Error(`Status ${response.status}: ${message}`);
-}
-
-export class r2rClient {
-  private axiosInstance: AxiosInstance;
-  private baseUrl: string;
-  private anonymousTelemetry: boolean;
-
-  // Authorization tokens
-  private accessToken: string | null;
-  private refreshToken: string | null;
-
-  constructor(
-    baseURL: string,
-    prefix: string = "/v2",
-    anonymousTelemetry = true,
-  ) {
-    this.baseUrl = `${baseURL}${prefix}`;
-    this.anonymousTelemetry = anonymousTelemetry;
-
-    this.accessToken = null;
-    this.refreshToken = null;
+    this.chunks = new ChunksClient(this);
+    this.collections = new CollectionsClient(this);
+    this.conversations = new ConversationsClient(this);
+    this.documents = new DocumentsClient(this);
+    this.graphs = new GraphsClient(this);
+    this.indices = new IndiciesClient(this);
+    this.prompts = new PromptsClient(this);
+    this.retrieval = new RetrievalClient(this);
+    this.system = new SystemClient(this);
+    this.users = new UsersClient(this);
 
     initializeTelemetry(this.anonymousTelemetry);
 
@@ -104,117 +91,21 @@ export class r2rClient {
     });
   }
 
-  setTokens(accessToken: string, refreshToken: string): void {
-    this.accessToken = accessToken;
-    this.refreshToken = refreshToken;
-  }
-
-  private async _makeRequest<T = any>(
+  public makeRequest<T = any>(
     method: Method,
     endpoint: string,
     options: any = {},
   ): Promise<T> {
-    const url = `${endpoint}`;
-    const config: AxiosRequestConfig = {
-      method,
-      url,
-      headers: { ...options.headers },
-      params: options.params,
-      ...options,
-      responseType: options.responseType || "json",
-    };
-
-    config.headers = config.headers || {};
-
-    if (options.params) {
-      config.paramsSerializer = (params) => {
-        return Object.entries(params)
-          .map(([key, value]) => {
-            if (Array.isArray(value)) {
-              return value
-                .map(
-                  (v) => `${encodeURIComponent(key)}=${encodeURIComponent(v)}`,
-                )
-                .join("&");
-            }
-            return `${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`;
-          })
-          .join("&");
-      };
-    }
-
-    if (options.data) {
-      if (typeof FormData !== "undefined" && options.data instanceof FormData) {
-        config.data = options.data;
-        delete config.headers["Content-Type"];
-      } else if (typeof options.data === "object") {
-        if (
-          config.headers["Content-Type"] === "application/x-www-form-urlencoded"
-        ) {
-          config.data = Object.keys(options.data)
-            .map(
-              (key) =>
-                `${encodeURIComponent(key)}=${encodeURIComponent(options.data[key])}`,
-            )
-            .join("&");
-        } else {
-          config.data = JSON.stringify(options.data);
-          if (method !== "DELETE") {
-            config.headers["Content-Type"] = "application/json";
-          } else {
-            config.headers["Content-Type"] = "application/json";
-            config.data = JSON.stringify(options.data);
-          }
-        }
-      } else {
-        config.data = options.data;
-      }
-    }
-
-    if (
-      this.accessToken &&
-      !["register", "login", "verify_email", "health"].includes(endpoint)
-    ) {
-      config.headers.Authorization = `Bearer ${this.accessToken}`;
-    }
-
-    if (options.responseType === "stream") {
-      const fetchHeaders: Record<string, string> = {};
-      Object.entries(config.headers).forEach(([key, value]) => {
-        if (typeof value === "string") {
-          fetchHeaders[key] = value;
-        }
-      });
-      const response = await fetch(`${this.baseUrl}/${endpoint}`, {
-        method,
-        headers: fetchHeaders,
-        body: config.data,
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      return response.body as unknown as T;
-    }
-
-    try {
-      const response = await this.axiosInstance.request(config);
-      return options.returnFullResponse
-        ? (response as any as T)
-        : response.data;
-    } catch (error) {
-      if (axios.isAxiosError(error) && error.response) {
-        handleRequestError(error.response);
-      }
-      throw error;
-    }
+    return this._makeRequest(method, endpoint, options, "v3");
   }
 
-  private _ensureAuthenticated(): void {
-    // if (!this.accessToken) {
-    //   throw new Error("Not authenticated. Please login first.");
-    // }
+  public getRefreshToken(): string | null {
+    return this.refreshToken;
+  }
+
+  setTokens(accessToken: string | null, refreshToken: string | null): void {
+    this.accessToken = accessToken;
+    this.refreshToken = refreshToken;
   }
 
   // -----------------------------------------------------------------------------
@@ -227,6 +118,7 @@ export class r2rClient {
    * @param email The email of the user to register.
    * @param password The password of the user to register.
    * @returns A promise that resolves to the response from the server.
+   * @deprecated Use `client.users.register` instead.
    */
 
   @feature("register")
@@ -240,11 +132,12 @@ export class r2rClient {
    * Verifies the email of a user with the given verification code.
    * @param verification_code The verification code to verify the email with.
    * @returns A promise that resolves to the response from the server.
+   * @deprecated Use `client.users.verifyEmail` instead.
    */
   @feature("verifyEmail")
-  async verifyEmail(verification_code: string): Promise<any> {
+  async verifyEmail(email: string, verification_code: string): Promise<any> {
     return await this._makeRequest("POST", "verify_email", {
-      data: { verification_code },
+      data: { email, verification_code },
     });
   }
 
@@ -253,6 +146,7 @@ export class r2rClient {
    * @param email The email of the user to log in.
    * @param password The password of the user to log in.
    * @returns A promise that resolves to the response from the server containing the access and refresh tokens.
+   * @deprecated Use `client.users.login` instead.
    */
   @feature("login")
   async login(
@@ -281,19 +175,25 @@ export class r2rClient {
     return response.results;
   }
 
+  /**
+   * Logs in a user using a token.
+   * @param accessToken The access token to use for authentication.
+   * @returns A promise that resolves to the response from the server containing the access token.
+   * @deprecated Use `client.users.loginWithToken` instead.
+   */
   @feature("loginWithToken")
   async loginWithToken(
     accessToken: string,
-  ): Promise<{ access_token: TokenInfo }> {
+  ): Promise<{ accessToken: TokenInfo }> {
     this.accessToken = accessToken;
 
     try {
       await this._makeRequest("GET", "user");
 
       return {
-        access_token: {
+        accessToken: {
           token: accessToken,
-          token_type: "access_token",
+          tokenType: "access_token",
         },
       };
     } catch (error) {
@@ -305,6 +205,7 @@ export class r2rClient {
   /**
    * Logs out the currently authenticated user.
    * @returns A promise that resolves to the response from the server.
+   * @deprecated Use `client.users.logout` instead.
    */
   @feature("logout")
   async logout(): Promise<any> {
@@ -319,6 +220,7 @@ export class r2rClient {
   /**
    * Retrieves the user information for the currently authenticated user.
    * @returns A promise that resolves to the response from the server containing the user information.
+   * @deprecated Use `client.users.list` instead.
    */
   @feature("user")
   async user(): Promise<any> {
@@ -333,6 +235,7 @@ export class r2rClient {
    * @param bio  The updated bio for the user.
    * @param profilePicture The updated profile picture URL for the user.
    * @returns A promise that resolves to the response from the server.
+   * @deprecated Use `client.users.update` instead.
    */
   @feature("updateUser")
   async updateUser(
@@ -368,6 +271,7 @@ export class r2rClient {
   /**
    * Refreshes the access token for the currently authenticated user.
    * @returns A promise that resolves to the response from the server containing the new access and refresh tokens.
+   * @deprecated Use `client.users.refreshAccessToken` instead.
    */
   async refreshAccessToken(): Promise<RefreshTokenResponse> {
     if (!this.refreshToken) {
@@ -400,6 +304,7 @@ export class r2rClient {
    * @param current_password The current password of the user.
    * @param new_password The new password to set for the user.
    * @returns A promise that resolves to the response from the server.
+   * @deprecated Use `client.users.changePassword` instead.
    */
   @feature("changePassword")
   async changePassword(
@@ -420,11 +325,15 @@ export class r2rClient {
    * Requests a password reset for the user with the given email.
    * @param email The email of the user to request a password reset for.
    * @returns A promise that resolves to the response from the server.
+   * @deprecated Use `client.users.requestPasswordReset` instead.
    */
   @feature("requestPasswordReset")
   async requestPasswordReset(email: string): Promise<any> {
-    return this._makeRequest("POST", "request_password_reset", {
-      data: { email },
+    return await this._makeRequest("POST", "request_password_reset", {
+      data: JSON.stringify(email),
+      headers: {
+        "Content-Type": "application/json",
+      },
     });
   }
 
@@ -433,6 +342,7 @@ export class r2rClient {
    * @param resetToken The reset token to confirm the password reset with.
    * @param newPassword The new password to set for the user.
    * @returns A promise that resolves to the response from the server.
+   * @deprecated Use `client.users.resetPassword` instead.
    */
   @feature("confirmPasswordReset")
   async confirmPasswordReset(
@@ -449,6 +359,7 @@ export class r2rClient {
    * @param user_id The ID of the user to delete, defaults to the currently authenticated user.
    * @param password The password of the user to delete.
    * @returns A promise that resolves to the response from the server.
+   * @deprecated Use `client.users.delete` instead.
    */
   @feature("deleteUser")
   async deleteUser(userId: string, password?: string): Promise<any> {
@@ -458,6 +369,17 @@ export class r2rClient {
     });
   }
 
+  /**
+   * Generates a new verification code and sends a reset email to the user.
+   * @param email The email address of the user to send the reset email to.
+   * @returns A promise that resolves to the verification code and message from the server.
+   */
+  @feature("sendResetEmail")
+  async sendResetEmail(email: string): Promise<Record<string, any>> {
+    return await this._makeRequest("POST", "send_reset_email", {
+      data: { email },
+    });
+  }
   // -----------------------------------------------------------------------------
   //
   // Ingestion
@@ -470,6 +392,7 @@ export class r2rClient {
    * @param files
    * @param options
    * @returns A promise that resolves to the response from the server.
+   * @deprecated Use `client.documents.create` instead.
    */
   @feature("ingestFiles")
   async ingestFiles(
@@ -479,6 +402,8 @@ export class r2rClient {
       document_ids?: string[];
       user_ids?: (string | null)[];
       ingestion_config?: Record<string, any>;
+      collection_ids?: string[];
+      run_with_orchestration?: boolean;
     } = {},
   ): Promise<any> {
     this._ensureAuthenticated();
@@ -544,6 +469,13 @@ export class r2rClient {
       ingestion_config: options.ingestion_config
         ? JSON.stringify(options.ingestion_config)
         : undefined,
+      collection_ids: options.collection_ids
+        ? JSON.stringify(options.collection_ids)
+        : undefined,
+      run_with_orchestration:
+        options.run_with_orchestration != undefined
+          ? String(options.run_with_orchestration)
+          : undefined,
     };
 
     Object.entries(data).forEach(([key, value]) => {
@@ -573,6 +505,7 @@ export class r2rClient {
    * @param files
    * @param options
    * @returns
+   * @deprecated Use `client.documents.update` instead.
    */
   @feature("updateFiles")
   async updateFiles(
@@ -581,6 +514,8 @@ export class r2rClient {
       document_ids: string[];
       metadatas?: Record<string, any>[];
       ingestion_config?: Record<string, any>;
+      collection_ids?: string[];
+      run_with_orchestration?: boolean;
     },
   ): Promise<any> {
     this._ensureAuthenticated();
@@ -621,6 +556,13 @@ export class r2rClient {
       ingestion_config: options.ingestion_config
         ? JSON.stringify(options.ingestion_config)
         : undefined,
+      collection_ids: options.collection_ids
+        ? JSON.stringify(options.collection_ids)
+        : undefined,
+      run_with_orchestration:
+        options.run_with_orchestration != undefined
+          ? String(options.run_with_orchestration)
+          : undefined,
     };
 
     Object.entries(data).forEach(([key, value]) => {
@@ -645,20 +587,160 @@ export class r2rClient {
     });
   }
 
+  /**
+   *
+   * @param chunks
+   * @param documentId
+   * @param metadata
+   * @param run_with_orchestration
+   * @deprecated use `client.chunks.create` instead.
+   * @returns
+   */
   @feature("ingestChunks")
   async ingestChunks(
     chunks: RawChunk[],
     documentId?: string,
     metadata?: Record<string, any>,
+    run_with_orchestration?: boolean,
+    collection_ids?: string[],
+  ): Promise<Record<string, any>> {
+    this._ensureAuthenticated();
+    let inputData: Record<string, any> = {
+      chunks: chunks,
+      document_id: documentId,
+      metadata: metadata,
+      collection_ids: collection_ids,
+      run_with_orchestration: run_with_orchestration,
+    };
+
+    return await this._makeRequest("POST", "ingest_chunks", {
+      data: inputData,
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+  }
+
+  /**
+   * Update the content of an existing chunk.
+   *
+   * @param documentId - The ID of the document containing the chunk.
+   * @param extractionId - The ID of the chunk to update.
+   * @param text - The new text content of the chunk.
+   * @param metadata - Optional metadata dictionary for the chunk.
+   * @param runWithOrchestration - Whether to run the update through orchestration.
+   * @returns Update results containing processed, failed, and skipped documents.
+   * @deprecated Use `client.chunks.update` instead.
+   */
+  @feature("updateChunk")
+  async updateChunk(
+    documentId: string,
+    extractionId: string,
+    text: string,
+    metadata?: Record<string, any>,
+    runWithOrchestration?: boolean,
   ): Promise<Record<string, any>> {
     this._ensureAuthenticated();
 
-    return await this._makeRequest("POST", "ingest_chunks", {
-      data: {
-        chunks: chunks,
-        document_id: documentId,
-        metadata: metadata,
+    const data: Record<string, any> = {
+      text,
+      metadata,
+      run_with_orchestration: runWithOrchestration,
+    };
+
+    Object.keys(data).forEach(
+      (key) => data[key] === undefined && delete data[key],
+    );
+
+    return await this._makeRequest(
+      "PUT",
+      `update_chunk/${documentId}/${extractionId}`,
+      {
+        data,
       },
+    );
+  }
+
+  /**
+   * Create a vector index for similarity search.
+   * @param options The options for creating the vector index
+   * @returns Promise resolving to the creation response
+   * @deprecated Use `client.indices.create` instead.
+   */
+  @feature("createVectorIndex")
+  async createVectorIndex(options: {
+    tableName: string;
+    indexMethod: "hnsw" | "ivfflat" | "auto";
+    indexMeasure: "cosine_distance" | "l2_distance" | "max_inner_product";
+    indexArguments?: {
+      m?: number; // HNSW: Number of connections per element
+      ef_construction?: number; // HNSW: Size of dynamic candidate list
+      n_lists?: number; // IVFFlat: Number of clusters/inverted lists
+    };
+    indexName?: string;
+    concurrently?: boolean;
+  }): Promise<Record<string, any>> {
+    this._ensureAuthenticated();
+
+    const data = {
+      table_name: options.tableName,
+      index_method: options.indexMethod,
+      index_measure: options.indexMeasure,
+      index_arguments: options.indexArguments,
+      index_name: options.indexName,
+      concurrently: options.concurrently ?? true,
+    };
+
+    return await this._makeRequest("POST", "create_vector_index", {
+      data,
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+  }
+
+  /**
+   * List existing vector indices for a table.
+   * @param options The options for listing vector indices
+   * @returns Promise resolving to the list of indices
+   * @deprecated Use `client.indices.list` instead.
+   */
+  @feature("listVectorIndices")
+  async listVectorIndices(options: {
+    tableName?: string;
+  }): Promise<Record<string, any>> {
+    this._ensureAuthenticated();
+
+    const params: Record<string, string> = {};
+    if (options.tableName) {
+      params.table_name = options.tableName;
+    }
+
+    return await this._makeRequest("GET", "list_vector_indices", { params });
+  }
+
+  /**
+   * Delete a vector index from a table.
+   * @param options The options for deleting the vector index
+   * @returns Promise resolving to the deletion response
+   * @deprecated Use `client.indices.delete` instead.
+   */
+  @feature("deleteVectorIndex")
+  async deleteVectorIndex(options: {
+    indexName: string;
+    tableName?: string;
+    concurrently?: boolean;
+  }): Promise<Record<string, any>> {
+    this._ensureAuthenticated();
+
+    const data = {
+      index_name: options.indexName,
+      table_name: options.tableName,
+      concurrently: options.concurrently ?? true,
+    };
+
+    return await this._makeRequest("DELETE", "delete_vector_index", {
+      data,
       headers: {
         "Content-Type": "application/json",
       },
@@ -674,6 +756,7 @@ export class r2rClient {
   /**
    * Check the health of the R2R deployment.
    * @returns A promise that resolves to the response from the server.
+   * @deprecated Use `client.system.health` instead.
    */
   async health(): Promise<any> {
     return await this._makeRequest("GET", "health");
@@ -682,6 +765,7 @@ export class r2rClient {
   /**
    * Get statistics about the server, including the start time, uptime, CPU usage, and memory usage.
    * @returns A promise that resolves to the response from the server.
+   * @deprecated Use `client.system.status` instead.
    */
   @feature("serverStats")
   async serverStats(): Promise<any> {
@@ -695,6 +779,7 @@ export class r2rClient {
    * @param template The new template for the prompt.
    * @param input_types The new input types for the prompt.
    * @returns A promise that resolves to the response from the server.
+   * @deprecated Use `client.prompts.update` instead.
    */
   @feature("updatePrompt")
   async updatePrompt(
@@ -721,10 +806,87 @@ export class r2rClient {
   }
 
   /**
+   * Add a new prompt to the system.
+   * @returns A promise that resolves to the response from the server.
+   * @param name The name of the prompt.
+   * @param template The template for the prompt.
+   * @param input_types The input types for the prompt.
+   * @deprecated Use `client.prompts.create` instead.
+   */
+  @feature("addPrompt")
+  async addPrompt(
+    name: string,
+    template: string,
+    input_types: Record<string, string>,
+  ): Promise<Record<string, any>> {
+    this._ensureAuthenticated();
+
+    const data: Record<string, any> = { name, template, input_types };
+
+    return await this._makeRequest("POST", "add_prompt", {
+      data,
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+  }
+
+  /**
+   * Get a prompt from the system.
+   * @param name The name of the prompt to retrieve.
+   * @param inputs Inputs for the prompt.
+   * @param prompt_override Override for the prompt template.
+   * @deprecated Use `client.prompts.retrieve` instead.
+   * @returns
+   */
+  @feature("getPrompt")
+  async getPrompt(
+    name: string,
+    inputs?: Record<string, any>,
+    prompt_override?: string,
+  ): Promise<Record<string, any>> {
+    this._ensureAuthenticated();
+
+    const params: Record<string, any> = {};
+    if (inputs) {
+      params["inputs"] = JSON.stringify(inputs);
+    }
+    if (prompt_override) {
+      params["prompt_override"] = prompt_override;
+    }
+
+    return await this._makeRequest("GET", `get_prompt/${name}`, { params });
+  }
+
+  /**
+   * Get all prompts from the system.
+   * @returns A promise that resolves to the response from the server.
+   * @deprecated Use `client.prompts.list` instead.
+   */
+  @feature("getAllPrompts")
+  async getAllPrompts(): Promise<Record<string, any>> {
+    this._ensureAuthenticated();
+    return await this._makeRequest("GET", "get_all_prompts");
+  }
+
+  /**
+   * Delete a prompt from the system.
+   * @param prompt_name The name of the prompt to delete.
+   * @returns A promise that resolves to the response from the server.
+   * @deprecated Use `client.prompts.delete` instead.
+   */
+  @feature("deletePrompt")
+  async deletePrompt(prompt_name: string): Promise<Record<string, any>> {
+    this._ensureAuthenticated();
+    return await this._makeRequest("DELETE", `delete_prompt/${prompt_name}`);
+  }
+
+  /**
    * Get analytics data from the server.
    * @param filter_criteria The filter criteria to use.
    * @param analysis_types The types of analysis to perform.
    * @returns A promise that resolves to the response from the server.
+   * @deprecated This method is deprecated. New, improved analytics features will be added in a future release.
    */
   @feature("analytics")
   async analytics(
@@ -757,6 +919,7 @@ export class r2rClient {
    * @param run_type_filter The run type to filter by.
    * @param max_runs Specifies the maximum number of runs to return. Values outside the range of 1 to 1000 will be adjusted to the nearest valid value with a default of 100.
    * @returns
+   * @deprecated Use `client.system.logs` instead.
    */
   @feature("logs")
   async logs(run_type_filter?: string, max_runs?: number): Promise<any> {
@@ -778,6 +941,7 @@ export class r2rClient {
   /**
    * Get the configuration settings for the app.
    * @returns A promise that resolves to the response from the server.
+   * @deprecated Use `client.system.settings` instead.
    */
   @feature("appSettings")
   async appSettings(): Promise<any> {
@@ -792,6 +956,7 @@ export class r2rClient {
    * * @param offset The offset to start listing users from.
    * @param limit The maximum number of users to return.
    * @returns
+   * @deprecated Use `client.users.list` instead.
    */
   @feature("usersOverview")
   async usersOverview(
@@ -823,6 +988,7 @@ export class r2rClient {
    * Delete data from the database given a set of filters.
    * @param filters The filters to delete by.
    * @returns The results of the deletion.
+   * @deprecated Use `client.<object>.delete` instead for the specific object you want to delete.
    */
   @feature("delete")
   async delete(filters: { [key: string]: any }): Promise<any> {
@@ -839,6 +1005,7 @@ export class r2rClient {
    * Download the raw file associated with a document.
    * @param documentId The ID of the document to retrieve.
    * @returns A promise that resolves to a Blob representing the PDF.
+   * @deprecated Use `client.documents.download` instead.
    */
   @feature("downloadFile")
   async downloadFile(documentId: string): Promise<Blob> {
@@ -853,6 +1020,7 @@ export class r2rClient {
    * @param offset The offset to start listing documents from.
    * @param limit The maximum number of documents to return.
    * @returns A promise that resolves to the response from the server.
+   * @deprecated Use `client.documents.list` instead.
    */
   @feature("documentsOverview")
   async documentsOverview(
@@ -880,6 +1048,7 @@ export class r2rClient {
    * Get the chunks for a document.
    * @param document_id The ID of the document to get the chunks for.
    * @returns A promise that resolves to the response from the server.
+   * @deprecated Use `client.documents.listChunks` instead.
    */
   @feature("documentChunks")
   async documentChunks(
@@ -905,34 +1074,12 @@ export class r2rClient {
     });
   }
 
-  // /**
-  //  * Inspect the knowledge graph associated with your R2R deployment.
-  //  * @param limit The maximum number of nodes to return. Defaults to 100.
-  //  * @returns A promise that resolves to the response from the server.
-  //  */
-  // @feature("inspectKnowledgeGraph")
-  // async inspectKnowledgeGraph(
-  //   offset?: number,
-  //   limit?: number,
-  // ): Promise<Record<string, any>> {
-  //   this._ensureAuthenticated();
-
-  //   const params: Record<string, number> = {};
-  //   if (offset !== undefined) {
-  //     params.offset = offset;
-  //   }
-  //   if (limit !== undefined) {
-  //     params.limit = limit;
-  //   }
-
-  //   return this._makeRequest("GET", "inspect_knowledge_graph", { params });
-  // }
-
   /**
    * Get an overview of existing collections.
    * @param collectionIds List of collection IDs to get an overview for.
    * @param limit The maximum number of collections to return.
    * @param offset The offset to start listing collections from.
+   * @deprecated use `client.collections.list` instead
    * @returns
    */
   @feature("collectionsOverview")
@@ -962,6 +1109,7 @@ export class r2rClient {
    * @param name The name of the collection.
    * @param description The description of the collection.
    * @returns
+   * @deprecated use `client.collections.create` instead
    */
   @feature("createCollection")
   async createCollection(
@@ -982,6 +1130,7 @@ export class r2rClient {
    * Get a collection by its ID.
    * @param collectionId The ID of the collection to get.
    * @returns A promise that resolves to the response from the server.
+   * @deprecated use `client.collections.retrieve` instead
    */
   @feature("getCollection")
   async getCollection(collectionId: string): Promise<Record<string, any>> {
@@ -998,6 +1147,7 @@ export class r2rClient {
    * @param name The new name for the collection.
    * @param description The new description of the collection.
    * @returns A promise that resolves to the response from the server.
+   * @deprecated use `client.collections.update` instead
    */
   @feature("updateCollection")
   async updateCollection(
@@ -1025,6 +1175,7 @@ export class r2rClient {
    * Delete a collection by its ID.
    * @param collectionId The ID of the collection to delete.
    * @returns A promise that resolves to the response from the server.
+   * @deprecated use `client.collections.delete` instead
    */
   @feature("deleteCollection")
   async deleteCollection(collectionId: string): Promise<Record<string, any>> {
@@ -1040,6 +1191,7 @@ export class r2rClient {
    * @param offset The offset to start listing collections from.
    * @param limit The maximum numberof collections to return.
    * @returns
+   * @deprecated use `client.collections.list` instead
    */
   @feature("listCollections")
   async listCollections(
@@ -1064,6 +1216,7 @@ export class r2rClient {
    * @param userId The ID of the user to add.
    * @param collectionId The ID of the collection to add the user to.
    * @returns A promise that resolves to the response from the server.
+   * @deprecated use `client.collections.addUser` instead
    */
   @feature("addUserToCollection")
   async addUserToCollection(
@@ -1081,6 +1234,7 @@ export class r2rClient {
    * @param userId The ID of the user to remove.
    * @param collectionId The ID of the collection to remove the user from.
    * @returns
+   * @deprecated use `client.collections.removeUser` instead
    */
   @feature("removeUserFromCollection")
   async removeUserFromCollection(
@@ -1099,6 +1253,7 @@ export class r2rClient {
    * @param offset The offset to start listing users from.
    * @param limit The maximum number of users to return.
    * @returns A promise that resolves to the response from the server.
+   * @deprecated use `client.collections.listUsers` instead
    */
   @feature("getUsersInCollection")
   async getUsersInCollection(
@@ -1127,6 +1282,7 @@ export class r2rClient {
    * Get all collections that a user is a member of.
    * @param userId The ID of the user to get collections for.
    * @returns A promise that resolves to the response from the server.
+   * @deprecated use `client.users.listCollections` instead
    */
   @feature("getCollectionsForUser")
   async getCollectionsForUser(
@@ -1156,6 +1312,7 @@ export class r2rClient {
    * @param document_id The ID of the document to assign.
    * @param collection_id The ID of the collection to assign the document to.
    * @returns
+   * @deprecated use `client.collections.addDocument` instead
    */
   @feature("assignDocumentToCollection")
   async assignDocumentToCollection(
@@ -1174,6 +1331,7 @@ export class r2rClient {
    * @param document_id The ID of the document to remove.
    * @param collection_id The ID of the collection to remove the document from.
    * @returns A promise that resolves to the response from the server.
+   * @deprecated use `client.collections.removeDocument` instead
    */
   @feature("removeDocumentFromCollection")
   async removeDocumentFromCollection(
@@ -1191,6 +1349,7 @@ export class r2rClient {
    * Get all collections that a document is assigned to.
    * @param documentId The ID of the document to get collections for.
    * @returns
+   * @deprecated use `client.collections.listDocuments` instead
    */
   @feature("getDocumentCollections")
   async getDocumentCollections(
@@ -1210,7 +1369,7 @@ export class r2rClient {
 
     return this._makeRequest(
       "GET",
-      `get_document_collections/${encodeURIComponent(documentId)}`,
+      `document_collections/${encodeURIComponent(documentId)}`,
       { params },
     );
   }
@@ -1221,6 +1380,7 @@ export class r2rClient {
    * @param offset The offset to start listing documents from.
    * @param limit The maximum number of documents to return.
    * @returns A promise that resolves to the response from the server.
+   * @deprecated use `client.collections.listDocuments` instead
    */
   @feature("getDocumentsInCollection")
   async getDocumentsInCollection(
@@ -1249,6 +1409,7 @@ export class r2rClient {
    * Get an overview of existing conversations.
    * @param limit The maximum number of conversations to return.
    * @param offset The offset to start listing conversations from.
+   * @deprecated use `client.conversations.list` instead
    * @returns
    */
   @feature("conversationsOverview")
@@ -1277,23 +1438,23 @@ export class r2rClient {
    * Get a conversation by its ID.
    * @param conversationId The ID of the conversation to get.
    * @param branchId The ID of the branch (optional).
+   * @deprecated use `client.conversations.retrieve` instead
    * @returns A promise that resolves to the response from the server.
    */
   @feature("getConversation")
   async getConversation(
     conversationId: string,
-    branchId?: string,
   ): Promise<Record<string, any>> {
     this._ensureAuthenticated();
-    const queryParams = branchId ? `?branch_id=${branchId}` : "";
     return this._makeRequest(
       "GET",
-      `get_conversation/${conversationId}${queryParams}`,
+      `get_conversation/${conversationId}`,
     );
   }
 
   /**
    * Create a new conversation.
+   * @deprecated use `client.conversations.create` instead
    * @returns A promise that resolves to the response from the server.
    */
   @feature("createConversation")
@@ -1306,6 +1467,7 @@ export class r2rClient {
    * Add a message to an existing conversation.
    * @param conversationId
    * @param message
+   * @deprecated use `client.conversations.addMessage` instead
    * @returns
    */
   @feature("addMessage")
@@ -1330,6 +1492,7 @@ export class r2rClient {
    * Update a message in an existing conversation.
    * @param message_id The ID of the message to update.
    * @param message The updated message.
+   * @deprecated use `client.conversations.updateMessage` instead
    * @returns A promise that resolves to the response from the server.
    */
   @feature("updateMessage")
@@ -1344,8 +1507,26 @@ export class r2rClient {
   }
 
   /**
+   * Update the metadata of a message in an existing conversation.
+   * @param message_id The ID of the message to update.
+   * @param metadata The updated metadata.
+   * @returns A promise that resolves to the response from the server.
+   */
+  @feature("updateMessageMetadata")
+  async updateMessageMetadata(
+    message_id: string,
+    metadata: Record<string, any>,
+  ): Promise<Record<string, any>> {
+    this._ensureAuthenticated();
+    return this._makeRequest("PATCH", `messages/${message_id}/metadata`, {
+      data: metadata,
+    });
+  }
+
+  /**
    * Get an overview of branches in a conversation.
    * @param conversationId The ID of the conversation to get branches for.
+   * @deprecated use `client.conversations.listBranches` instead
    * @returns A promise that resolves to the response from the server.
    */
   @feature("branchesOverview")
@@ -1398,6 +1579,7 @@ export class r2rClient {
   /**
    * Delete a conversation by its ID.
    * @param conversationId The ID of the conversation to delete.
+   * @deprecated use `client.conversations.delete` instead
    * @returns A promise that resolves to the response from the server.
    */
   @feature("deleteConversation")
@@ -1410,18 +1592,256 @@ export class r2rClient {
 
   // -----------------------------------------------------------------------------
   //
-  // Restructure
+  // Knowledge Graphs
   //
   // -----------------------------------------------------------------------------
 
   /**
+   * Create a graph from the given settings.
+   * @returns A promise that resolves to the response from the server.
+   *
+   * @param collection_id The ID of the collection to create the graph for.
+   * @param run_type The type of run to perform.
+   * @param graph_creation_settings Settings for the graph creation process.
+   */
+  @feature("createGraph")
+  async createGraph(
+    collection_id?: string,
+    run_type?: KGRunType,
+    graph_creation_settings?: Record<string, any>,
+  ): Promise<Record<string, any>> {
+    this._ensureAuthenticated();
+
+    const json_data: Record<string, any> = {
+      collection_id,
+      run_type,
+      graph_creation_settings,
+    };
+
+    Object.keys(json_data).forEach(
+      (key) => json_data[key] === undefined && delete json_data[key],
+    );
+
+    return await this._makeRequest("POST", "create_graph", { data: json_data });
+  }
+  /**
    * Perform graph enrichment over the entire graph.
    * @returns A promise that resolves to the response from the server.
+   *
+   * @param collection_id The ID of the collection to enrich the graph for.
+   * @param run_type The type of run to perform.
+   * @param graph_enrichment_settings Settings for the graph enrichment process.
    */
   @feature("enrichGraph")
-  async enrichGraph(): Promise<any> {
+  async enrichGraph(
+    collection_id?: string,
+    run_type?: KGRunType,
+    graph_enrichment_settings?: Record<string, any>,
+  ): Promise<any> {
     this._ensureAuthenticated();
-    return await this._makeRequest("POST", "enrich_graph");
+
+    const json_data: Record<string, any> = {
+      collection_id,
+      run_type,
+      graph_enrichment_settings,
+    };
+
+    Object.keys(json_data).forEach(
+      (key) => json_data[key] === undefined && delete json_data[key],
+    );
+
+    return await this._makeRequest("POST", "enrich_graph", { data: json_data });
+  }
+
+  /**
+   * Retrieve entities from the knowledge graph.
+   * @returns A promise that resolves to the response from the server.
+   * @param collection_id The ID of the collection to retrieve entities for.
+   * @param offset The offset for pagination.
+   * @param limit The limit for pagination.
+   * @param entity_level The level of entity to filter by.
+   * @param entity_ids Entity IDs to filter by.
+   * @returns
+   */
+  @feature("getEntities")
+  async getEntities(
+    collection_id?: string,
+    offset?: number,
+    limit?: number,
+    entity_level?: string,
+    entity_ids?: string[],
+  ): Promise<any> {
+    this._ensureAuthenticated();
+
+    const params: Record<string, any> = {};
+    if (collection_id !== undefined) {
+      params.collection_id = collection_id;
+    }
+    if (offset !== undefined) {
+      params.offset = offset;
+    }
+    if (limit !== undefined) {
+      params.limit = limit;
+    }
+    if (entity_level !== undefined) {
+      params.entity_level = entity_level;
+    }
+    if (entity_ids !== undefined) {
+      params.entity_ids = entity_ids;
+    }
+
+    return this._makeRequest("GET", `entities`, { params });
+  }
+
+  /**
+   * Retrieve relationships from the knowledge graph.
+   * @returns A promise that resolves to the response from the server.
+   * @param collection_id The ID of the collection to retrieve entities for.
+   * @param offset The offset for pagination.
+   * @param limit The limit for pagination.
+   * @param entity_level The level of entity to filter by.
+   * @param relationship_ids Relationship IDs to filter by.
+   */
+  @feature("getTriples")
+  async getTriples(
+    collection_id?: string,
+    offset?: number,
+    limit?: number,
+    entity_level?: string,
+    relationship_ids?: string[],
+  ): Promise<any> {
+    this._ensureAuthenticated();
+
+    const params: Record<string, any> = {};
+    if (collection_id !== undefined) {
+      params.collection_id = collection_id;
+    }
+    if (offset !== undefined) {
+      params.offset = offset;
+    }
+    if (limit !== undefined) {
+      params.limit = limit;
+    }
+    if (entity_level !== undefined) {
+      params.entity_level = entity_level;
+    }
+    if (relationship_ids !== undefined) {
+      params.entity_ids = relationship_ids;
+    }
+
+    return this._makeRequest("GET", `triples`, { params });
+  }
+
+  /**
+   * Retrieve communities from the knowledge graph.
+   * @param collection_id The ID of the collection to retrieve entities for.
+   * @param offset The offset for pagination.
+   * @param limit The limit for pagination.
+   * @param levels Levels to filter by.
+   * @param community_ids Community numbers to filter by.
+   * @returns
+   */
+  @feature("getCommunities")
+  async getCommunities(
+    collection_id?: string,
+    offset?: number,
+    limit?: number,
+    levels?: number,
+    community_ids?: number[],
+  ): Promise<any> {
+    this._ensureAuthenticated();
+
+    const params: Record<string, any> = {};
+    if (collection_id !== undefined) {
+      params.collection_id = collection_id;
+    }
+    if (offset !== undefined) {
+      params.offset = offset;
+    }
+    if (limit !== undefined) {
+      params.limit = limit;
+    }
+    if (levels !== undefined) {
+      params.levels = levels;
+    }
+    if (community_ids !== undefined) {
+      params.community_ids = community_ids;
+    }
+
+    return this._makeRequest("GET", `communities`, { params });
+  }
+
+  @feature("getTunedPrompt")
+  async getTunedPrompt(
+    prompt_name: string,
+    collection_id?: string,
+    documents_offset?: number,
+    documents_limit?: number,
+    chunk_offset?: number,
+    chunk_limit?: number,
+  ): Promise<any> {
+    this._ensureAuthenticated();
+
+    const params: Record<string, any> = { prompt_name };
+    if (collection_id !== undefined) {
+      params.collection_id = collection_id;
+    }
+    if (documents_offset !== undefined) {
+      params.documents_offset = documents_offset;
+    }
+    if (documents_limit !== undefined) {
+      params.documents_limit = documents_limit;
+    }
+    if (chunk_offset !== undefined) {
+      params.chunk_offset = chunk_offset;
+    }
+    if (chunk_limit !== undefined) {
+      params.chunk_limit = chunk_limit;
+    }
+
+    return this._makeRequest("GET", `tuned_prompt`, { params });
+  }
+
+  @feature("deduplicateEntities")
+  async deduplicateEntities(
+    collections_id?: string,
+    run_type?: KGRunType,
+    deduplication_settings?:
+      | KGEntityDeduplicationSettings
+      | Record<string, any>,
+  ): Promise<any> {
+    this._ensureAuthenticated();
+
+    const json_data: Record<string, any> = {
+      collections_id,
+      run_type,
+      deduplication_settings,
+    };
+
+    Object.keys(json_data).forEach(
+      (key) => json_data[key] === undefined && delete json_data[key],
+    );
+
+    return await this._makeRequest("POST", "deduplicate_entities", {
+      data: json_data,
+    });
+  }
+
+  @feature("deleteGraphForCollection")
+  async deleteGraphForCollection(
+    collection_id: string,
+    cascade: boolean = false,
+  ): Promise<any> {
+    this._ensureAuthenticated();
+
+    const json_data: Record<string, any> = {
+      collection_id,
+      cascade,
+    };
+
+    return await this._makeRequest("DELETE", `delete_graph`, {
+      data: json_data,
+    });
   }
 
   // -----------------------------------------------------------------------------
@@ -1431,24 +1851,51 @@ export class r2rClient {
   // -----------------------------------------------------------------------------
 
   /**
+   * Search over documents.
+   * @param query The query to search for.
+   * @param vector_search_settings Settings for the document search.
+   * @returns A promise that resolves to the response from the server.
+   */
+  @feature("searchDocuments")
+  async searchDocuments(
+    query: string,
+    vector_search_settings?: Record<string, any>,
+  ): Promise<any> {
+    this._ensureAuthenticated();
+    const json_data: Record<string, any> = {
+      query,
+      vector_search_settings,
+    };
+
+    Object.keys(json_data).forEach(
+      (key) => json_data[key] === undefined && delete json_data[key],
+    );
+
+    return await this._makeRequest("POST", "search_documents", {
+      data: json_data,
+    });
+  }
+
+  /**
    * Conduct a vector and/or KG search.
    * @param query The query to search for.
    * @param vector_search_settings Vector search settings.
-   * @param kg_search_settings KG search settings.
+   * @param graph_search_settings KG search settings.
+   * @deprecated use `client.retrieval.search` instead
    * @returns
    */
   @feature("search")
   async search(
     query: string,
-    vector_search_settings?: VectorSearchSettings | Record<string, any>,
-    kg_search_settings?: KGSearchSettings | Record<string, any>,
+    vector_search_settings?: Record<string, any>,
+    graph_search_settings?: Record<string, any>,
   ): Promise<any> {
     this._ensureAuthenticated();
 
     const json_data: Record<string, any> = {
       query,
       vector_search_settings,
-      kg_search_settings,
+      graph_search_settings,
     };
 
     Object.keys(json_data).forEach(
@@ -1462,18 +1909,19 @@ export class r2rClient {
    * Conducts a Retrieval Augmented Generation (RAG) search with the given query.
    * @param query The query to search for.
    * @param vector_search_settings Vector search settings.
-   * @param kg_search_settings KG search settings.
+   * @param graph_search_settings KG search settings.
    * @param rag_generation_config RAG generation configuration.
    * @param task_prompt_override Task prompt override.
    * @param include_title_if_available Include title if available.
+   * @deprecated use `client.retrieval.search` instead
    * @returns A promise that resolves to the response from the server.
    */
   @feature("rag")
   async rag(
     query: string,
-    vector_search_settings?: VectorSearchSettings | Record<string, any>,
-    kg_search_settings?: KGSearchSettings | Record<string, any>,
-    rag_generation_config?: GenerationConfig | Record<string, any>,
+    vector_search_settings?: Record<string, any>,
+    graph_search_settings?: Record<string, any>,
+    rag_generation_config?: Record<string, any>,
     task_prompt_override?: string,
     include_title_if_available?: boolean,
   ): Promise<any | AsyncGenerator<string, void, unknown>> {
@@ -1482,7 +1930,7 @@ export class r2rClient {
     const json_data: Record<string, any> = {
       query,
       vector_search_settings,
-      kg_search_settings,
+      graph_search_settings,
       rag_generation_config,
       task_prompt_override,
       include_title_if_available,
@@ -1518,31 +1966,35 @@ export class r2rClient {
   /**
    * Performs a single turn in a conversation with a RAG agent.
    * @param messages The messages to send to the agent.
-   * @param vector_search_settings Vector search settings.
-   * @param kg_search_settings KG search settings.
    * @param rag_generation_config RAG generation configuration.
+   * @param vector_search_settings Vector search settings.
+   * @param graph_search_settings KG search settings.
    * @param task_prompt_override Task prompt override.
    * @param include_title_if_available Include title if available.
+   * @param conversation_id The ID of the conversation, if not a new conversation.
    * @returns A promise that resolves to the response from the server.
+   * @deprecated use `client.retrieval.agent` instead
    */
   @feature("agent")
   async agent(
     messages: Message[],
-    vector_search_settings?: VectorSearchSettings | Record<string, any>,
-    kg_search_settings?: KGSearchSettings | Record<string, any>,
-    rag_generation_config?: GenerationConfig | Record<string, any>,
+    rag_generation_config?: Record<string, any>,
+    vector_search_settings?: Record<string, any>,
+    graph_search_settings?: Record<string, any>,
     task_prompt_override?: string,
     include_title_if_available?: boolean,
+    conversation_id?: string,
   ): Promise<any | AsyncGenerator<string, void, unknown>> {
     this._ensureAuthenticated();
 
     const json_data: Record<string, any> = {
       messages,
       vector_search_settings,
-      kg_search_settings,
+      graph_search_settings,
       rag_generation_config,
       task_prompt_override,
       include_title_if_available,
+      conversation_id
     };
 
     Object.keys(json_data).forEach(
