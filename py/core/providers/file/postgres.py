@@ -178,8 +178,12 @@ class PostgresFileProvider(FileProvider):
         async with conn.transaction():
             try:
                 # Check if the large object exists before opening
+                # lo_exists = await conn.fetchval(
+                #     "SELECT EXISTS(SELECT 1 FROM pg_largeobject WHERE loid = $1)",
+                #     oid,
+                # )
                 lo_exists = await conn.fetchval(
-                    "SELECT EXISTS(SELECT 1 FROM pg_largeobject WHERE loid = $1)",
+                    "SELECT EXISTS(SELECT 1 FROM pg_largeobject_metadata WHERE oid = $1)",
                     oid,
                 )
                 if not lo_exists:
