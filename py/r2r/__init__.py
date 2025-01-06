@@ -8,9 +8,9 @@ from shared import *
 
 logger = logging.getLogger()
 
-pyproject_path = Path(__file__).parent.parent / "pyproject.toml"
-pyproject_data = toml.load(pyproject_path)
-__version__ = pyproject_data["tool"]["poetry"]["version"]
+# pyproject_path = Path(__file__).parent.parent / "pyproject.toml"
+# pyproject_data = toml.load(pyproject_path)
+__version__ = "3.2.16"
 
 
 __all__ = [

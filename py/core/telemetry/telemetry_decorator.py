@@ -25,11 +25,12 @@ class ProductTelemetryClient:
     def version(self) -> str:
         if self._version is None:
             try:
-                pyproject_path = (
-                    Path(__file__).parent.parent.parent / "pyproject.toml"
-                )
-                pyproject_data = toml.load(pyproject_path)
-                self._version = pyproject_data["tool"]["poetry"]["version"]
+                # pyproject_path = (
+                #     Path(__file__).parent.parent.parent / "pyproject.toml"
+                # )
+                # pyproject_data = toml.load(pyproject_path)
+                # self._version = pyproject_data["tool"]["poetry"]["version"]
+                self._version = "3.2.16"
             except Exception as e:
                 logger.error(
                     f"Error reading version from pyproject.toml: {str(e)}"
