@@ -58,7 +58,7 @@ spec:
           - -c
           - |
             exec uvicorn core.main.app_entry:app --host $${R2R_HOST} --port $${R2R_PORT}
-        image: cramplifidev.azurecr.io/r2r:latest
+        image: crAmplifiProd.azurecr.io/r2r:latest
         imagePullPolicy: Always
         envFrom:
           - configMapRef:
