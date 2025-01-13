@@ -21,6 +21,8 @@ concurrent_request_limit = 1
 provider = "litellm"
 base_model = "azure/text-embedding-3-large"
 base_dimension = 1_024
+batch_size = 256
+concurrent_request_limit = 256
 
 [ingestion]
 provider = "unstructured_local"
