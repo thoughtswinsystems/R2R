@@ -6,7 +6,7 @@ metadata:
   name: unstructured
   namespace: r2r-dev
 spec:
-  replicas: 4
+  replicas: 2
   selector:
     matchLabels:
       app: unstructured
@@ -20,6 +20,13 @@ spec:
         image: ragtoriches/unst-prod
         ports:
           - containerPort: 7275
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "1"
+          limits:
+            memory: "2Gi"
+            cpu: "2"
 
 ---
 apiVersion: v1
