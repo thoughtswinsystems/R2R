@@ -79,6 +79,13 @@ spec:
             path: /v2/health
           initialDelaySeconds: 15
           periodSeconds: 10
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "1"
+          limits:
+            memory: "2Gi"
+            cpu: "2"
 #        volumeMounts:
 #          - mountPath: /mnt/r2r-config
 #            name: r2r-config-mount
