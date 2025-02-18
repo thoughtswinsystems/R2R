@@ -1,0 +1,43 @@
+# Deployment and Service for Unstructured
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: unstructured
+  namespace: r2r-prod
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: unstructured
+  template:
+    metadata:
+      labels:
+        app: unstructured
+    spec:
+      containers:
+      - name: unstructured
+        image: ragtoriches/unst-prod
+        ports:
+          - containerPort: 7275
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "1"
+          limits:
+            memory: "2Gi"
+            cpu: "2"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: unstructured
+  namespace: r2r-prod
+spec:
+  ports:
+  - protocol: TCP
+    port: 7275
+    targetPort: 7275
+  selector:
+    app: unstructured
