@@ -7,7 +7,7 @@ spec:
   project: default
   source:
     repoURL: https://github.com/thoughtswinsystems/R2R.git
-    targetRevision: prod-release
+    targetRevision: k8s-deployment-release
     path: py/k8s/prod/azure
     directory:
       recurse: true

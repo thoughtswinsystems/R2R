@@ -20,7 +20,7 @@ spec:
         image: emrgntcmplxty/r2r-dashboard:latest
         env:
           - name: NEXT_PUBLIC_R2R_DEPLOYMENT_URL
-            value: http://4.174.219.49:7272
+            value: http://r2r.r2r-prod:7272
         ports:
           - containerPort: 3000
 
@@ -35,6 +35,6 @@ spec:
   - protocol: TCP
     port: 7273
     targetPort: 3000
-  type: LoadBalancer
+  type: ClusterIP
   selector:
     app: r2r-dashboard
