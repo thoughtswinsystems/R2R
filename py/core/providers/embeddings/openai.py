@@ -1,15 +1,16 @@
 import logging
 import os
-from typing import Any, List
+from typing import Any
 
+import tiktoken
 from openai import AsyncOpenAI, AuthenticationError, OpenAI
 from openai._types import NOT_GIVEN
 
 from core.base import (
+    ChunkSearchResult,
     EmbeddingConfig,
     EmbeddingProvider,
     EmbeddingPurpose,
-    VectorSearchResult,
 )
 
 logger = logging.getLogger()
@@ -96,7 +97,7 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
             "dimensions": self._get_dimensions(),
         } | kwargs
 
-    async def _execute_task(self, task: dict[str, Any]) -> List[List[float]]:
+    async def _execute_task(self, task: dict[str, Any]) -> list[list[float]]:
         texts = task["texts"]
         kwargs = self._get_embedding_kwargs(**task.get("kwargs", {}))
 
@@ -115,7 +116,7 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
             logger.error(error_msg)
             raise ValueError(error_msg) from e
 
-    def _execute_task_sync(self, task: dict[str, Any]) -> List[List[float]]:
+    def _execute_task_sync(self, task: dict[str, Any]) -> list[list[float]]:
         texts = task["texts"]
         kwargs = self._get_embedding_kwargs(**task.get("kwargs", {}))
         try:
@@ -136,11 +137,11 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
     async def async_get_embedding(
         self,
         text: str,
-        stage: EmbeddingProvider.PipeStage = EmbeddingProvider.PipeStage.BASE,
+        stage: EmbeddingProvider.Step = EmbeddingProvider.Step.BASE,
         purpose: EmbeddingPurpose = EmbeddingPurpose.INDEX,
         **kwargs,
-    ) -> List[float]:
-        if stage != EmbeddingProvider.PipeStage.BASE:
+    ) -> list[float]:
+        if stage != EmbeddingProvider.Step.BASE:
             raise ValueError(
                 "OpenAIEmbeddingProvider only supports search stage."
             )
@@ -157,11 +158,11 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
     def get_embedding(
         self,
         text: str,
-        stage: EmbeddingProvider.PipeStage = EmbeddingProvider.PipeStage.BASE,
+        stage: EmbeddingProvider.Step = EmbeddingProvider.Step.BASE,
         purpose: EmbeddingPurpose = EmbeddingPurpose.INDEX,
         **kwargs,
-    ) -> List[float]:
-        if stage != EmbeddingProvider.PipeStage.BASE:
+    ) -> list[float]:
+        if stage != EmbeddingProvider.Step.BASE:
             raise ValueError(
                 "OpenAIEmbeddingProvider only supports search stage."
             )
@@ -177,12 +178,12 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
 
     async def async_get_embeddings(
         self,
-        texts: List[str],
-        stage: EmbeddingProvider.PipeStage = EmbeddingProvider.PipeStage.BASE,
+        texts: list[str],
+        stage: EmbeddingProvider.Step = EmbeddingProvider.Step.BASE,
         purpose: EmbeddingPurpose = EmbeddingPurpose.INDEX,
         **kwargs,
-    ) -> List[List[float]]:
-        if stage != EmbeddingProvider.PipeStage.BASE:
+    ) -> list[list[float]]:
+        if stage != EmbeddingProvider.Step.BASE:
             raise ValueError(
                 "OpenAIEmbeddingProvider only supports search stage."
             )
@@ -197,12 +198,12 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
 
     def get_embeddings(
         self,
-        texts: List[str],
-        stage: EmbeddingProvider.PipeStage = EmbeddingProvider.PipeStage.BASE,
+        texts: list[str],
+        stage: EmbeddingProvider.Step = EmbeddingProvider.Step.BASE,
         purpose: EmbeddingPurpose = EmbeddingPurpose.INDEX,
         **kwargs,
-    ) -> List[List[float]]:
-        if stage != EmbeddingProvider.PipeStage.BASE:
+    ) -> list[list[float]]:
+        if stage != EmbeddingProvider.Step.BASE:
             raise ValueError(
                 "OpenAIEmbeddingProvider only supports search stage."
             )
@@ -218,19 +219,22 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
     def rerank(
         self,
         query: str,
-        results: list[VectorSearchResult],
-        stage: EmbeddingProvider.PipeStage = EmbeddingProvider.PipeStage.RERANK,
+        results: list[ChunkSearchResult],
+        stage: EmbeddingProvider.Step = EmbeddingProvider.Step.RERANK,
+        limit: int = 10,
+    ):
+        return results[:limit]
+
+    async def arerank(
+        self,
+        query: str,
+        results: list[ChunkSearchResult],
+        stage: EmbeddingProvider.Step = EmbeddingProvider.Step.RERANK,
         limit: int = 10,
     ):
         return results[:limit]
 
     def tokenize_string(self, text: str, model: str) -> list[int]:
-        try:
-            import tiktoken
-        except ImportError as e:
-            raise ValueError(
-                "Must download tiktoken library to run `tokenize_string`."
-            ) from e
         if model not in OpenAIEmbeddingProvider.MODEL_TO_TOKENIZER:
             raise ValueError(f"OpenAI embedding model {model} not supported.")
         encoding = tiktoken.get_encoding(

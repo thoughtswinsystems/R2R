@@ -1,52 +1,72 @@
 from .base import AsyncSyncMeta, R2RSerializable, syncable
-from .completion import CompletionRecord, MessageType
 from .document import (
-    DataType,
     Document,
-    DocumentExtraction,
-    DocumentInfo,
+    DocumentChunk,
+    DocumentResponse,
     DocumentType,
+    GraphConstructionStatus,
+    GraphExtractionStatus,
+    IngestionMode,
     IngestionStatus,
-    KGEnrichmentStatus,
-    KGExtractionStatus,
     RawChunk,
+    UnprocessedChunk,
 )
 from .embedding import EmbeddingPurpose, default_embedding_prefixes
-from .exception import R2RDocumentProcessingError, R2RException
+from .exception import (
+    PDFParsingError,
+    PopplerNotFoundError,
+    R2RDocumentProcessingError,
+    R2RException,
+)
 from .graph import (
     Community,
-    CommunityReport,
     Entity,
-    EntityType,
-    KGExtraction,
-    RelationshipType,
-    Triple,
+    GraphCommunitySettings,
+    GraphCreationSettings,
+    GraphEnrichmentSettings,
+    GraphExtraction,
+    Relationship,
+    StoreType,
 )
-from .kg import KGCreationSettings, KGEnrichmentSettings, KGRunType
 from .llm import (
     GenerationConfig,
     LLMChatCompletion,
     LLMChatCompletionChunk,
     Message,
+    MessageType,
     RAGCompletion,
 )
 from .prompt import Prompt
 from .search import (
     AggregateSearchResult,
+    ChunkSearchResult,
+    ChunkSearchSettings,
+    ContextDocumentResult,
+    GraphCommunityResult,
+    GraphEntityResult,
+    GraphRelationshipResult,
+    GraphSearchResult,
+    GraphSearchResultType,
+    GraphSearchSettings,
     HybridSearchSettings,
-    KGCommunityResult,
-    KGEntityResult,
-    KGGlobalResult,
-    KGRelationshipResult,
-    KGSearchMethod,
-    KGSearchResult,
-    KGSearchResultType,
-    KGSearchSettings,
-    VectorSearchResult,
-    VectorSearchSettings,
+    SearchMode,
+    SearchSettings,
+    WebSearchResult,
+    select_search_filters,
 )
-from .user import Token, TokenData, UserStats
-from .vector import StorageResult, Vector, VectorEntry, VectorType
+from .user import Token, TokenData, User
+from .vector import (
+    IndexArgsHNSW,
+    IndexArgsIVFFlat,
+    IndexMeasure,
+    IndexMethod,
+    StorageResult,
+    Vector,
+    VectorEntry,
+    VectorQuantizationType,
+    VectorTableName,
+    VectorType,
+)
 
 __all__ = [
     # Base abstractions
@@ -54,32 +74,33 @@ __all__ = [
     "AsyncSyncMeta",
     "syncable",
     # Completion abstractions
-    "CompletionRecord",
     "MessageType",
     # Document abstractions
-    "DataType",
     "Document",
-    "DocumentExtraction",
-    "DocumentInfo",
+    "DocumentChunk",
+    "DocumentResponse",
+    "IngestionMode",
     "IngestionStatus",
-    "KGExtractionStatus",
-    "KGEnrichmentStatus",
+    "GraphExtractionStatus",
+    "GraphConstructionStatus",
     "DocumentType",
     "RawChunk",
+    "UnprocessedChunk",
     # Embedding abstractions
     "EmbeddingPurpose",
     "default_embedding_prefixes",
     # Exception abstractions
     "R2RDocumentProcessingError",
     "R2RException",
+    "PDFParsingError",
+    "PopplerNotFoundError",
     # Graph abstractions
     "Entity",
-    "EntityType",
-    "RelationshipType",
     "Community",
-    "CommunityReport",
-    "KGExtraction",
-    "Triple",
+    "Community",
+    "GraphExtraction",
+    "Relationship",
+    "StoreType",
     # LLM abstractions
     "GenerationConfig",
     "LLMChatCompletion",
@@ -90,29 +111,38 @@ __all__ = [
     "Prompt",
     # Search abstractions
     "AggregateSearchResult",
-    "KGSearchResult",
-    "KGSearchMethod",
-    "KGSearchResultType",
-    "KGEntityResult",
-    "KGRelationshipResult",
-    "KGCommunityResult",
-    "KGGlobalResult",
-    "KGSearchSettings",
-    "VectorSearchResult",
-    "VectorSearchSettings",
+    "GraphSearchResult",
+    "WebSearchResult",
+    "GraphSearchResultType",
+    "GraphEntityResult",
+    "GraphRelationshipResult",
+    "GraphCommunityResult",
+    "GraphSearchSettings",
+    "ChunkSearchSettings",
+    "ContextDocumentResult",
+    "ChunkSearchResult",
+    "SearchSettings",
+    "select_search_filters",
     "HybridSearchSettings",
-    # KG abstractions
-    "KGCreationSettings",
-    "KGEnrichmentSettings",
-    "KGExtraction",
-    "KGRunType",
+    "SearchMode",
+    # graph abstractions
+    "GraphCreationSettings",
+    "GraphEnrichmentSettings",
+    "GraphExtraction",
+    "GraphCommunitySettings",
     # User abstractions
     "Token",
     "TokenData",
-    "UserStats",
+    "User",
     # Vector abstractions
     "Vector",
     "VectorEntry",
     "VectorType",
+    "IndexMethod",
+    "IndexMeasure",
+    "IndexArgsIVFFlat",
+    "IndexArgsHNSW",
+    "VectorTableName",
+    "VectorQuantizationType",
     "StorageResult",
 ]

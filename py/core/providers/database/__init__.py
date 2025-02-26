@@ -1,5 +1,5 @@
-from .postgres import PostgresDBProvider
+from .postgres import PostgresDatabaseProvider
 
 __all__ = [
-    "PostgresDBProvider",
+    "PostgresDatabaseProvider",
 ]

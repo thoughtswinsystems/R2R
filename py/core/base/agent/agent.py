@@ -2,7 +2,9 @@ import asyncio
 import json
 import logging
 from abc import ABC, abstractmethod
-from typing import Any, AsyncGenerator, Dict, List, Optional, Type, Union
+from datetime import datetime
+from json import JSONDecodeError
+from typing import Any, AsyncGenerator, Optional, Type
 
 from pydantic import BaseModel
 
@@ -10,9 +12,9 @@ from core.base.abstractions import (
     GenerationConfig,
     LLMChatCompletion,
     Message,
-    MessageType,
+    R2RException,
 )
-from core.base.providers import CompletionProvider, PromptProvider
+from core.base.providers import CompletionProvider, DatabaseProvider
 
 from .base import Tool, ToolResult
 
@@ -21,25 +23,8 @@ logger = logging.getLogger()
 
 class Conversation:
     def __init__(self):
-        self.messages: List[Message] = []
+        self.messages: list[Message] = []
         self._lock = asyncio.Lock()
-
-    def create_and_add_message(
-        self,
-        role: Union[MessageType, str],
-        content: Optional[str] = None,
-        name: Optional[str] = None,
-        function_call: Optional[Dict[str, Any]] = None,
-        tool_calls: Optional[List[Dict[str, Any]]] = None,
-    ):
-        message = Message(
-            role=role,
-            content=content,
-            name=name,
-            function_call=function_call,
-            tool_calls=tool_calls,
-        )
-        self.add_message(message)
 
     async def add_message(self, message):
         async with self._lock:
@@ -55,10 +40,12 @@ class Conversation:
 
 # TODO - Move agents to provider pattern
 class AgentConfig(BaseModel):
-    system_instruction_name: str = "rag_agent"
-    tool_names: list[str] = ["search"]
-    generation_config: GenerationConfig = GenerationConfig()
+    agent_static_prompt: str = "static_rag_agent"
+    agent_dynamic_prompt: str = "dynamic_reasoning_rag_agent_prompted"
+    tools: list[str] = ["search"]
+    tool_names: Optional[list[str]] = None
     stream: bool = False
+    include_tools: bool = True
 
     @classmethod
     def create(cls: Type["AgentConfig"], **kwargs: Any) -> "AgentConfig":
@@ -68,6 +55,9 @@ class AgentConfig(BaseModel):
             for k, v in kwargs.items()
             if k in base_args
         }
+        filtered_kwargs["tools"] = kwargs.get("tools", None) or kwargs.get(
+            "tool_names", None
+        )
         return cls(**filtered_kwargs)  # type: ignore
 
 
@@ -75,29 +65,34 @@ class Agent(ABC):
     def __init__(
         self,
         llm_provider: CompletionProvider,
-        prompt_provider: PromptProvider,
+        database_provider: DatabaseProvider,
         config: AgentConfig,
+        rag_generation_config: GenerationConfig,
     ):
         self.llm_provider = llm_provider
-        self.prompt_provider = prompt_provider
+        self.database_provider: DatabaseProvider = database_provider
         self.config = config
         self.conversation = Conversation()
         self._completed = False
         self._tools: list[Tool] = []
+        self.rag_generation_config = rag_generation_config
         self._register_tools()
 
     @abstractmethod
     def _register_tools(self):
         pass
 
-    async def _setup(self, system_instruction: Optional[str] = None):
+    async def _setup(
+        self, system_instruction: Optional[str] = None, *args, **kwargs
+    ):
         await self.conversation.add_message(
             Message(
                 role="system",
                 content=system_instruction
                 or (
-                    await self.prompt_provider.get_prompt(
-                        self.config.system_instruction_name
+                    await self.database_provider.prompts_handler.get_cached_prompt(
+                        self.config.agent_static_prompt,
+                        inputs={"date": str(datetime.now().isoformat())},
                     )
                 ),
             )
@@ -118,9 +113,7 @@ class Agent(ABC):
         messages: Optional[list[Message]] = None,
         *args,
         **kwargs,
-    ) -> Union[
-        list[LLMChatCompletion], AsyncGenerator[LLMChatCompletion, None]
-    ]:
+    ) -> list[LLMChatCompletion] | AsyncGenerator[LLMChatCompletion, None]:
         pass
 
     @abstractmethod
@@ -129,7 +122,7 @@ class Agent(ABC):
         response: Any,
         *args,
         **kwargs,
-    ) -> Union[None, AsyncGenerator[str, None]]:
+    ) -> None | AsyncGenerator[str, None]:
         pass
 
     async def execute_tool(self, tool_name: str, *args, **kwargs) -> str:
@@ -144,38 +137,38 @@ class Agent(ABC):
         if (
             last_message["role"] in ["tool", "function"]
             and last_message["content"] != ""
+            and "ollama" in self.rag_generation_config.model
+            or not self.config.include_tools
         ):
             return GenerationConfig(
-                **self.config.generation_config.model_dump(
+                **self.rag_generation_config.model_dump(
                     exclude={"functions", "tools", "stream"}
                 ),
                 stream=stream,
             )
+
         return GenerationConfig(
-            **self.config.generation_config.model_dump(
+            **self.rag_generation_config.model_dump(
                 exclude={"functions", "tools", "stream"}
             ),
             # FIXME: Use tools instead of functions
             # TODO - Investigate why `tools` fails with OpenAI+LiteLLM
-            # tools=[
-            #     {
-            #         "function":{
-            #             "name": tool.name,
-            #             "description": tool.description,
-            #             "parameters": tool.parameters,
-            #         },
-            #         "type": "function"
-            #     }
-            #     for tool in self.tools
-            # ],
-            functions=[
-                {
-                    "name": tool.name,
-                    "description": tool.description,
-                    "parameters": tool.parameters,
-                }
-                for tool in self.tools
-            ],
+            tools=(
+                [
+                    {
+                        "function": {
+                            "name": tool.name,
+                            "description": tool.description,
+                            "parameters": tool.parameters,
+                        },
+                        "type": "function",
+                        "name": tool.name,
+                    }
+                    for tool in self.tools
+                ]
+                if self.tools
+                else None
+            ),
             stream=stream,
         )
 
@@ -187,37 +180,36 @@ class Agent(ABC):
         *args,
         **kwargs,
     ) -> ToolResult:
-        await self.conversation.add_message(
-            Message(
-                role="assistant",
-                tool_calls=(
-                    [
-                        {
-                            "id": tool_id,
-                            "function": {
-                                "name": function_name,
-                                "arguments": function_arguments,
-                            },
-                        }
-                    ]
-                    if tool_id
-                    else None
-                ),
-                function_call=(
-                    {
-                        "name": function_name,
-                        "arguments": function_arguments,
-                    }
-                    if not tool_id
-                    else None
-                ),
-            )
+        logger.info(
+            f"Calling function: {function_name}, args: {function_arguments}, tool_id: {tool_id}"
         )
-
         if tool := next(
             (t for t in self.tools if t.name == function_name), None
         ):
-            merged_kwargs = {**kwargs, **json.loads(function_arguments)}
+            try:
+                function_args = json.loads(function_arguments)
+
+            except JSONDecodeError as e:
+                error_message = f"The requested tool '{function_name}' is not available with arguments {function_arguments} failed."
+                tool_result = ToolResult(
+                    raw_result=error_message,
+                    llm_formatted_result=error_message,
+                )
+                await self.conversation.add_message(
+                    Message(
+                        role="tool" if tool_id else "function",
+                        content=str(tool_result.llm_formatted_result),
+                        name=function_name,
+                        tool_call_id=tool_id,
+                    )
+                )
+
+                raise R2RException(
+                    message=f"Error parsing function arguments: {e}, agent likely produced invalid tool inputs.",
+                    status_code=400,
+                ) from e
+
+            merged_kwargs = {**kwargs, **function_args}
             raw_result = await tool.results_function(*args, **merged_kwargs)
             llm_formatted_result = tool.llm_format_function(raw_result)
             tool_result = ToolResult(
@@ -226,19 +218,14 @@ class Agent(ABC):
             )
             if tool.stream_function:
                 tool_result.stream_result = tool.stream_function(raw_result)
-        else:
-            error_message = f"The requested tool '{function_name}' is not available. Available tools: {', '.join(t.name for t in self.tools)}"
-            tool_result = ToolResult(
-                raw_result=error_message,
-                llm_formatted_result=error_message,
-            )
 
-        await self.conversation.add_message(
-            Message(
-                role="tool" if tool_id else "function",
-                content=str(tool_result.llm_formatted_result),
-                name=function_name,
+            await self.conversation.add_message(
+                Message(
+                    role="tool" if tool_id else "function",
+                    content=str(tool_result.llm_formatted_result),
+                    name=function_name,
+                    tool_call_id=tool_id,
+                )
             )
-        )
 
         return tool_result

@@ -3,18 +3,32 @@ import asyncio
 import json
 from typing import AsyncGenerator
 
-from core.base.abstractions import DataType
+from core.base import R2RException
 from core.base.parsers.base_parser import AsyncParser
+from core.base.providers import (
+    CompletionProvider,
+    DatabaseProvider,
+    IngestionConfig,
+)
 
 
-class JSONParser(AsyncParser[DataType]):
+class JSONParser(AsyncParser[str | bytes]):
     """A parser for JSON data."""
 
+    def __init__(
+        self,
+        config: IngestionConfig,
+        database_provider: DatabaseProvider,
+        llm_provider: CompletionProvider,
+    ):
+        self.database_provider = database_provider
+        self.llm_provider = llm_provider
+        self.config = config
+
     async def ingest(
-        self, data: DataType, *args, **kwargs
+        self, data: str | bytes, *args, **kwargs
     ) -> AsyncGenerator[str, None]:
-        """
-        Ingest JSON data and yield a formatted text representation.
+        """Ingest JSON data and yield a formatted text representation.
 
         :param data: The JSON data to parse.
         :param kwargs: Additional keyword arguments.
@@ -23,12 +37,17 @@ class JSONParser(AsyncParser[DataType]):
             data = data.decode("utf-8")
 
         loop = asyncio.get_event_loop()
-        parsed_json = await loop.run_in_executor(None, json.loads, data)
 
-        parsed_json = json.loads(data)
-        formatted_text = await loop.run_in_executor(
-            None, self._parse_json, parsed_json
-        )
+        try:
+            parsed_json = await loop.run_in_executor(None, json.loads, data)
+            formatted_text = await loop.run_in_executor(
+                None, self._parse_json, parsed_json
+            )
+        except json.JSONDecodeError as e:
+            raise R2RException(
+                message=f"Failed to parse JSON data, likely due to invalid JSON: {str(e)}",
+                status_code=400,
+            ) from e
 
         chunk_size = kwargs.get("chunk_size")
         if chunk_size and isinstance(chunk_size, int):

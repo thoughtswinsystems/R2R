@@ -1,66 +1,72 @@
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
 from pydantic import BaseModel
 
-from core.agent import R2RRAGAgent, R2RStreamingRAGAgent
-from core.base.pipes import AsyncPipe
-from core.base.providers import (
-    AuthProvider,
-    CompletionProvider,
-    DatabaseProvider,
-    EmbeddingProvider,
-    FileProvider,
-    IngestionProvider,
-    KGProvider,
-    OrchestrationProvider,
-    PromptProvider,
+from core.providers import (
+    AnthropicCompletionProvider,
+    AsyncSMTPEmailProvider,
+    ConsoleMockEmailProvider,
+    HatchetOrchestrationProvider,
+    JwtAuthProvider,
+    LiteLLMCompletionProvider,
+    LiteLLMEmbeddingProvider,
+    OllamaEmbeddingProvider,
+    OpenAICompletionProvider,
+    OpenAIEmbeddingProvider,
+    PostgresDatabaseProvider,
+    R2RAuthProvider,
+    R2RCompletionProvider,
+    R2RIngestionProvider,
+    SendGridEmailProvider,
+    SimpleOrchestrationProvider,
+    SupabaseAuthProvider,
+    UnstructuredIngestionProvider,
 )
-from core.pipelines import RAGPipeline, SearchPipeline
+
+if TYPE_CHECKING:
+    from core.main.services.auth_service import AuthService
+    from core.main.services.graph_service import GraphService
+    from core.main.services.ingestion_service import IngestionService
+    from core.main.services.management_service import ManagementService
+    from core.main.services.retrieval_service import RetrievalService
 
 
 class R2RProviders(BaseModel):
-    auth: AuthProvider
-    database: DatabaseProvider
-    ingestion: IngestionProvider
-    embedding: EmbeddingProvider
-    file: FileProvider
-    kg: KGProvider
-    llm: CompletionProvider
-    orchestration: OrchestrationProvider
-    prompt: PromptProvider
+    auth: R2RAuthProvider | SupabaseAuthProvider | JwtAuthProvider
+    database: PostgresDatabaseProvider
+    ingestion: R2RIngestionProvider | UnstructuredIngestionProvider
+    embedding: (
+        LiteLLMEmbeddingProvider
+        | OpenAIEmbeddingProvider
+        | OllamaEmbeddingProvider
+    )
+    completion_embedding: (
+        LiteLLMEmbeddingProvider
+        | OpenAIEmbeddingProvider
+        | OllamaEmbeddingProvider
+    )
+    llm: (
+        AnthropicCompletionProvider
+        | LiteLLMCompletionProvider
+        | OpenAICompletionProvider
+        | R2RCompletionProvider
+    )
+    orchestration: HatchetOrchestrationProvider | SimpleOrchestrationProvider
+    email: (
+        AsyncSMTPEmailProvider
+        | ConsoleMockEmailProvider
+        | SendGridEmailProvider
+    )
 
     class Config:
         arbitrary_types_allowed = True
 
 
-class R2RPipes(BaseModel):
-    parsing_pipe: AsyncPipe
-    embedding_pipe: AsyncPipe
-    kg_search_pipe: AsyncPipe
-    kg_triples_extraction_pipe: AsyncPipe
-    kg_storage_pipe: AsyncPipe
-    kg_entity_description_pipe: AsyncPipe
-    kg_clustering_pipe: AsyncPipe
-    kg_community_summary_pipe: AsyncPipe
-    rag_pipe: AsyncPipe
-    streaming_rag_pipe: AsyncPipe
-    vector_storage_pipe: AsyncPipe
-    vector_search_pipe: AsyncPipe
-
-    class Config:
-        arbitrary_types_allowed = True
-
-
-class R2RPipelines(BaseModel):
-    search_pipeline: SearchPipeline
-    rag_pipeline: RAGPipeline
-    streaming_rag_pipeline: RAGPipeline
-
-    class Config:
-        arbitrary_types_allowed = True
-
-
-class R2RAgents(BaseModel):
-    rag_agent: R2RRAGAgent
-    streaming_rag_agent: R2RStreamingRAGAgent
-
-    class Config:
-        arbitrary_types_allowed = True
+@dataclass
+class R2RServices:
+    auth: "AuthService"
+    ingestion: "IngestionService"
+    management: "ManagementService"
+    retrieval: "RetrievalService"
+    graph: "GraphService"

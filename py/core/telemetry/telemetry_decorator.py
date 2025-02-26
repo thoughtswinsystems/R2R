@@ -28,8 +28,9 @@ class ProductTelemetryClient:
                 pyproject_path = (
                     Path(__file__).parent.parent.parent / "pyproject.toml"
                 )
-                pyproject_data = toml.load(pyproject_path)
-                self._version = pyproject_data["tool"]["poetry"]["version"]
+                with open(pyproject_path) as f:
+                    pyproject_data = toml.load(f)
+                    self._version = pyproject_data["project"]["version"]
             except Exception as e:
                 logger.error(
                     f"Error reading version from pyproject.toml: {str(e)}"
@@ -80,7 +81,6 @@ if os.getenv("TELEMETRY_ENABLED", "true").lower() in ("true", "1"):
 def telemetry_event(event_name):
     def decorator(func):
         def log_telemetry(event_type, user_id, metadata, error_message=None):
-
             if telemetry_thread_pool is None:
                 return
 
