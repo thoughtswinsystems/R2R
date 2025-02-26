@@ -6,7 +6,7 @@ metadata:
   name: unstructured
   namespace: r2r-dev
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: unstructured
