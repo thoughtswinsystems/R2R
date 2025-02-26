@@ -1,13 +1,10 @@
 import logging
 
 # Keep '*' imports for enhanced development velocity
-# corresponding flake8 error codes are F403, F405
 from .agent import *
 from .base import *
 from .main import *
 from .parsers import *
-from .pipelines import *
-from .pipes import *
 from .providers import *
 
 logger = logging.getLogger()
@@ -32,227 +29,138 @@ logger.propagate = False
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("LiteLLM").setLevel(logging.WARNING)
 
-
 __all__ = [
-    ## AGENT
-    # Base
     "R2RAgent",
     "R2RStreamingAgent",
-    # RAG Agents
+    "SearchResultsCollector",
     "R2RRAGAgent",
     "R2RStreamingRAGAgent",
-    ## BASE
-    # Base abstractions
+    "R2RStreamingReasoningRAGAgent",
+    "R2RXMLToolsStreamingReasoningRAGAgent",
     "AsyncSyncMeta",
     "syncable",
-    # Completion abstractions
-    "CompletionRecord",
     "MessageType",
-    # Document abstractions
-    "DataType",
     "Document",
-    "DocumentExtraction",
-    "DocumentInfo",
+    "DocumentChunk",
+    "DocumentResponse",
     "IngestionStatus",
-    "KGExtractionStatus",
-    "KGEnrichmentStatus",
+    "GraphExtractionStatus",
+    "GraphConstructionStatus",
     "DocumentType",
-    # Embedding abstractions
     "EmbeddingPurpose",
     "default_embedding_prefixes",
-    # Exception abstractions
     "R2RDocumentProcessingError",
     "R2RException",
-    # KG abstractions
     "Entity",
-    "KGExtraction",
-    "Triple",
-    # LLM abstractions
+    "GraphExtraction",
+    "Relationship",
     "GenerationConfig",
     "LLMChatCompletion",
     "LLMChatCompletionChunk",
     "RAGCompletion",
-    # Prompt abstractions
     "Prompt",
-    # Search abstractions
     "AggregateSearchResult",
-    "KGSearchResult",
-    "KGSearchSettings",
-    "VectorSearchResult",
-    "VectorSearchSettings",
-    # User abstractions
+    "WebSearchResponse",
+    "GraphSearchResult",
+    "ChunkSearchSettings",
+    "GraphSearchSettings",
+    "ChunkSearchResult",
+    "WebSearchResult",
+    "SearchSettings",
+    "select_search_filters",
+    "SearchMode",
+    "HybridSearchSettings",
     "Token",
     "TokenData",
-    "UserStats",
-    # Vector abstractions
     "Vector",
     "VectorEntry",
     "VectorType",
-    ## AGENT
-    # Agent abstractions
+    "IndexConfig",
     "Agent",
     "AgentConfig",
     "Conversation",
     "Message",
     "Tool",
     "ToolResult",
-    ## API
-    # Auth Responses
-    "GenericMessageResponse",
     "TokenResponse",
-    "UserResponse",
-    ## LOGGING
-    # Basic types
-    "RunType",
-    "AnalysisTypes",
-    "LogAnalytics",
-    "LogAnalyticsConfig",
-    "LogFilterCriteria",
-    "LogProcessor",
-    # Logging Providers
-    "SqlitePersistentLoggingProvider",
-    "LoggingConfig",
-    "R2RLoggingProvider",
-    # Run Manager
-    "RunManager",
-    "manage_run",
-    ## PARSERS
-    # Base parser
-    "AsyncParser",
-    ## PIPELINE
-    # Base pipeline
-    "AsyncPipeline",
-    ## PIPES
-    "AsyncPipe",
-    "AsyncState",
-    "PipeType",
-    ## PROVIDERS
-    # Base provider classes
+    "User",
     "AppConfig",
     "Provider",
     "ProviderConfig",
-    # Auth provider
     "AuthConfig",
     "AuthProvider",
-    # Crypto provider
     "CryptoConfig",
     "CryptoProvider",
-    # Database providers
+    "EmailConfig",
+    "EmailProvider",
+    "LimitSettings",
     "DatabaseConfig",
     "DatabaseProvider",
-    "RelationalDBProvider",
-    "VectorDBProvider",
-    # Embedding provider
     "EmbeddingConfig",
     "EmbeddingProvider",
-    # Knowledge Graph provider
-    "KGConfig",
-    "KGProvider",
-    # LLM provider
     "CompletionConfig",
     "CompletionProvider",
-    # Prompt provider
-    "PromptConfig",
-    "PromptProvider",
-    ## UTILS
     "RecursiveCharacterTextSplitter",
     "TextSplitter",
-    "run_pipeline",
-    "to_async_generator",
-    "generate_run_id",
+    "generate_id",
     "increment_version",
-    "EntityType",
-    "RelationshipType",
-    "format_entity_types",
-    "format_relations",
     "validate_uuid",
-    ## MAIN
-    ## R2R ABSTRACTIONS
     "R2RProviders",
-    "R2RPipes",
-    "R2RPipelines",
-    "R2RAgents",
-    ## R2R APP
     "R2RApp",
-    ## R2R APP ENTRY
-    # "r2r_app",
-    ## R2R ASSEMBLY
-    # Builder
     "R2RBuilder",
-    # Config
     "R2RConfig",
-    # Factory
     "R2RProviderFactory",
-    "R2RPipeFactory",
-    "R2RPipelineFactory",
-    "R2RAgentFactory",
-    # R2R Routers
-    "AuthRouter",
-    "IngestionRouter",
-    "ManagementRouter",
-    "RetrievalRouter",
-    "KGRouter",
-    ## R2R SERVICES
     "AuthService",
     "IngestionService",
     "ManagementService",
     "RetrievalService",
-    "KgService",
-    ## PARSERS
-    # Media parsers
+    "GraphService",
     "AudioParser",
+    "BMPParser",
+    "DOCParser",
     "DOCXParser",
     "ImageParser",
-    "PDFParser",
+    "ODTParser",
+    "VLMPDFParser",
+    "BasicPDFParser",
     "PDFParserUnstructured",
-    "PDFParserMarker",
     "PPTParser",
-    # Structured parsers
+    "PPTXParser",
+    "RTFParser",
     "CSVParser",
     "CSVParserAdvanced",
+    "EMLParser",
+    "EPUBParser",
     "JSONParser",
+    "MSGParser",
+    "ORGParser",
+    "P7SParser",
+    "RSTParser",
+    "TIFFParser",
+    "TSVParser",
+    "XLSParser",
     "XLSXParser",
     "XLSXParserAdvanced",
-    # Text parsers
     "MDParser",
     "HTMLParser",
     "TextParser",
-    ## PIPELINES
-    "SearchPipeline",
-    "RAGPipeline",
-    ## PIPES
-    "SearchPipe",
-    "EmbeddingPipe",
-    "KGTriplesExtractionPipe",
-    "ParsingPipe",
-    "QueryTransformPipe",
-    "SearchRAGPipe",
-    "StreamingSearchRAGPipe",
-    "VectorSearchPipe",
-    "VectorStoragePipe",
-    "KGStoragePipe",
-    "MultiSearchPipe",
-    ## PROVIDERS
-    # Auth
     "SupabaseAuthProvider",
     "R2RAuthProvider",
+    "JwtAuthProvider",
+    # Email
     # Crypto
-    "BCryptProvider",
-    "BCryptConfig",
-    # Database
-    "PostgresDBProvider",
-    # Embeddings
+    "BCryptCryptoProvider",
+    "BcryptCryptoConfig",
+    "NaClCryptoConfig",
+    "NaClCryptoProvider",
+    "PostgresDatabaseProvider",
     "LiteLLMEmbeddingProvider",
     "OpenAIEmbeddingProvider",
-    # KG
-    "PostgresKGProvider",
-    # LLM
+    "OllamaEmbeddingProvider",
     "OpenAICompletionProvider",
-    "LiteCompletionProvider",
-    # Ingestion
+    "R2RCompletionProvider",
+    "LiteLLMCompletionProvider",
     "UnstructuredIngestionProvider",
     "R2RIngestionProvider",
     "ChunkingStrategy",
-    # Prompts
-    "R2RPromptProvider",
 ]

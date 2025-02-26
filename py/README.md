@@ -1,102 +1,115 @@
-<p align="left">
-  <a href="https://r2r-docs.sciphi.ai"><img src="https://img.shields.io/badge/docs.sciphi.ai-3F16E4" alt="Docs"></a>
-  <a href="https://discord.gg/p6KqD2kjtB"><img src="https://img.shields.io/discord/1120774652915105934?style=social&logo=discord" alt="Discord"></a>
-  <a href="https://github.com/SciPhi-AI"><img src="https://img.shields.io/github/stars/SciPhi-AI/R2R" alt="Github Stars"></a>
-  <a href="https://github.com/SciPhi-AI/R2R/pulse"><img src="https://img.shields.io/github/commit-activity/w/SciPhi-AI/R2R" alt="Commits-per-week"></a>
-  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-purple.svg" alt="License: MIT"></a>
-  <a href="https://gurubase.io/g/r2r"><img src="https://img.shields.io/badge/Gurubase-Ask%20R2R%20Guru-006BFF" alt="Gurubase: R2R Guru"></a>
-</p>
+![Screenshot 2025-01-30 at 5 11 34 PM](https://github.com/user-attachments/assets/16d32b31-4c7d-4e84-be19-24574b33527b)
 
-<img width="1041" alt="r2r" src="https://github.com/user-attachments/assets/b6ee6a78-5d37-496d-ae10-ce18eee7a1d6">
+
+
+
 <h3 align="center">
-Build, scale, and deploy state of the art Retrieval-Augmented Generation applications.
+The most advanced AI retrieval system.
+
+Agentic Retrieval-Augmented Generation (RAG) with a RESTful API.
 </h3>
 
+<div align="center">
+   <div>
+      <h3>
+         <a href="https://app.sciphi.ai">
+            <strong>Sign up</strong>
+         </a> ·
+         <a href="https://r2r-docs.sciphi.ai/self-hosting/installation/overview">
+            <strong>Self Host</strong>
+      </h3>
+   </div>
+   <div>
+      <a href="https://r2r-docs.sciphi.ai/"><strong>Docs</strong></a> ·
+      <a href="https://github.com/SciPhi-AI/R2R/issues/new?assignees=&labels=&projects=&template=bug_report.md&title="><strong>Report Bug</strong></a> ·
+      <a href="https://github.com/SciPhi-AI/R2R/issues/new?assignees=&labels=&projects=&template=feature_request.md&title="><strong>Feature Request</strong></a> ·
+      <a href="https://discord.gg/p6KqD2kjtB"><strong>Discord</strong></a>
+   </div>
+   <br />
+   <p align="center">
+    <a href="https://r2r-docs.sciphi.ai"><img src="https://img.shields.io/badge/docs.sciphi.ai-3F16E4" alt="Docs"></a>
+    <a href="https://discord.gg/p6KqD2kjtB"><img src="https://img.shields.io/discord/1120774652915105934?style=social&logo=discord" alt="Discord"></a>
+    <a href="https://github.com/SciPhi-AI"><img src="https://img.shields.io/github/stars/SciPhi-AI/R2R" alt="Github Stars"></a>
+    <a href="https://github.com/SciPhi-AI/R2R/pulse"><img src="https://img.shields.io/github/commit-activity/w/SciPhi-AI/R2R" alt="Commits-per-week"></a>
+    <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-purple.svg" alt="License: MIT"></a>
+    <a href="https://gurubase.io/g/r2r"><img src="https://img.shields.io/badge/Gurubase-Ask%20R2R%20Guru-006BFF" alt="Gurubase: R2R Guru"></a>
+  </p>
+</div>
+
 # About
-R2R (RAG to Riches), the Elasticsearch for RAG, bridges the gap between experimenting with and deploying state of the art Retrieval-Augmented Generation (RAG) applications. It's a complete platform that helps you quickly build and launch scalable RAG solutions. Built around a containerized [RESTful API](https://r2r-docs.sciphi.ai/api-reference/introduction), R2R offers multimodal ingestion support, hybrid search, GraphRAG capabilities, user management, and observability features.
+R2R (Reason to Retrieve) is the most advanced AI retrieval system, supporting Retrieval-Augmented Generation (RAG) with production-ready features. Built around a containerized RESTful API, R2R offers multimodal content ingestion, hybrid search functionality, knowledge graphs, and comprehensive user and document management.
 
 For a more complete view of R2R, check out the [full documentation](https://r2r-docs.sciphi.ai/).
-
-## Key Features
-- [**📁 Multimodal Ingestion**](https://r2r-docs.sciphi.ai/documentation/configuration/ingestion/overview): Parse `.txt`, `.pdf`, `.json`, `.png`, `.mp3`, and more.
-- [**🔍 Hybrid Search**](https://r2r-docs.sciphi.ai/cookbooks/hybrid-search): Combine semantic and keyword search with reciprocal rank fusion for enhanced relevancy.
-- [**🔗 Graph RAG**](https://r2r-docs.sciphi.ai/cookbooks/graphrag): Automatically extract relationships and build knowledge graphs.
-- [**🗂️ App Management**](https://r2r-docs.sciphi.ai/cookbooks/user-auth): Efficiently manage documents and users with full authentication.
-- [**🔭 Observability**](https://r2r-docs.sciphi.ai/cookbooks/observability): Observe and analyze your RAG engine performance.
-- [**🧩 Configurable**](https://r2r-docs.sciphi.ai/documentation/configuration/introduction): Provision your application using intuitive configuration files.
-- [**🖥️ Dashboard**](https://github.com/SciPhi-AI/R2R-Dashboard): An open-source React+Next.js app with optional authentication, to interact with R2R via GUI.
-
-
-## [What's New](https://r2r-docs.sciphi.ai/introduction/whats-new)
-
-- Release 3.1.0&nbsp;&nbsp;&nbsp;&nbsp;September 6, 2024&nbsp;&nbsp;&nbsp;&nbsp;
-
-  Warning: These changes are breaking! We will be releasing a migration script soon.
-  - Orchestration with [Hatchet](https://github.com/hatchet-dev/hatchet)
-  - Default ingestion provider set to [Unstructured](https://docs.unstructured.io/welcome)
-  - Improved knowledge graph construction process
-
-
-## Install with pip
-The recommended way to get started with R2R is by using our CLI.
-
-```bash
-pip install r2r
-```
-
-
-You may run R2R directly from the python package, but additional dependencies like Postgres+pgvector must be configured and the full R2R core is required:
-
-```bash
-# export OPENAI_API_KEY=sk-...
-# export POSTGRES...
-pip install 'r2r[core,ingestion-bundle]'
-r2r --config-name=default serve
-```
-
-Alternatively, R2R can be launched alongside its requirements inside Docker:
-
-```bash
-# export OPENAI_API_KEY=sk-...
-r2r serve --docker --full
-```
-
-The command above will install the `full` installation which includes Hatchet for orchestration and Unstructured.io for parsing.
 
 
 ## Getting Started
 
-- [Installation](https://r2r-docs.sciphi.ai/documentation/installation): Quick installation of R2R using Docker or pip
-- [Quickstart](https://r2r-docs.sciphi.ai/documentation/quickstart): A quick introduction to R2R's core features
+### [SciPhi Cloud](https://app.sciphi.ai)
 
-## API & SDKs
+Access R2R through a deployment managed by the SciPhi team, which includes a generous free-tier. No credit card required.
 
-- [SDK](https://r2r-docs.sciphi.ai/documentation/python-sdk): API reference and Python/JS SDKs for interacting with R2R
-- [API](https://r2r-docs.sciphi.ai/api-reference/introduction): API reference and Python/JS SDKs for interacting with R2R
-- [Configuration](https://r2r-docs.sciphi.ai/documentation/configuration/introduction): A guide on how to configure your R2R system
+## Local
 
-## Cookbooks
+Install and run R2R:
 
-- Advanced RAG Pipelines
-  - [RAG Agent](https://r2r-docs.sciphi.ai/cookbooks/agent): R2R's powerful RAG agent
-  - [Hybrid Search](https://r2r-docs.sciphi.ai/cookbooks/hybrid-search): Introduction to hybrid search
-  - [Advanced RAG](https://r2r-docs.sciphi.ai/cookbooks/advanced-rag): Advanced RAG features
+```bash
+# Install the R2R package
+pip install r2r
 
-- Knowledge Graphs
-  - [GraphRAG](https://r2r-docs.sciphi.ai/cookbooks/graphrag): Walkthrough of GraphRAG
+# Set necessary environment variables
+export OPENAI_API_KEY=sk-...
 
-- Auth & Admin Features
-  - [Web Development](https://r2r-docs.sciphi.ai/cookbooks/web-dev): Building webapps using R2R
-  - [User Auth](https://r2r-docs.sciphi.ai/cookbooks/user-auth): Authenticating users
-  - [Collections](https://r2r-docs.sciphi.ai/cookbooks/collections): Document collections
-  - [Analytics & Observability](https://r2r-docs.sciphi.ai/cookbooks/observability): End-to-end logging and analytics
-  - [Web Application](https://r2r-docs.sciphi.ai/cookbooks/application): Connecting with the R2R Application
+# Run R2R in `light` mode
+python -m r2r.serve
+
+# Alternatively, run R2R in `full` mode
+# git clone git@github.com:SciPhi-AI/R2R.git . && cd R2R
+# export OPENAI_API_KEY=sk-...
+# export R2R_CONFIG_NAME=full
+
+# docker compose -f compose.full.yaml --profile postgres up -d
+# `--profile postgres` can be omitted when using external Postgres
+
+# Refer to docs for local LLM setup - https://r2r-docs.sciphi.ai/self-hosting/local-rag
+```
+
+## Key Features
+
+### Ingestion & Retrieval
+
+- **📁 [Multimodal Ingestion](https://r2r-docs.sciphi.ai/self-hosting/configuration/ingestion)**
+  Parse `.txt`, `.pdf`, `.json`, `.png`, `.mp3`, and more.
+- **🔍 [Hybrid Search](https://r2r-docs.sciphi.ai/documentation/search-and-rag)**
+  Combine semantic and keyword search with reciprocal rank fusion for enhanced relevancy.
+- **🔗 [Knowledge Graphs](https://r2r-docs.sciphi.ai/cookbooks/graphs)**
+  Automatically extract entities and relationships to build knowledge graphs.
+- **🤖 [Agentic RAG](https://r2r-docs.sciphi.ai/documentation/retrieval/reasoning_agent)**
+  R2R's powerful reasoning agent integrated with RAG.
+
+
+### Application Layer
+
+- 💻 **[Web Development](https://r2r-docs.sciphi.ai/cookbooks/web-dev)**
+  Building web apps using R2R.
+- 🔐 **[User Auth](https://r2r-docs.sciphi.ai/documentation/user-auth)**
+  Authenticating users.
+- 📂 **[Collections](https://r2r-docs.sciphi.ai/self-hosting/collections)**
+  Document collections management.
+- 🌐 **[Web Application](https://r2r-docs.sciphi.ai/cookbooks/web-dev)**
+  Connecting with the R2R Application.
+
+### Self-Hosting
+
+- 🐋 **[Docker](/self-hosting/installation/full/docker)**
+  Use Docker to easily deploy the full R2R system into your local environment
+- 🧩 **[Configuration](https://r2r-docs.sciphi.ai/self-hosting/configuration/overview)**
+  Set up your application using intuitive configuration files.
 
 ## Community
 
-[Join our Discord server](https://discord.gg/p6KqD2kjtB) to get support and connect with both the R2R team and other developers in the community. Whether you're encountering issues, looking for advice on best practices, or just want to share your experiences, we're here to help.
+[Join our Discord](https://discord.gg/p6KqD2kjtB) to get support and connect with both the R2R team and other developers in the community. Whether you're encountering issues, looking for advice on best practices, or just want to share your experiences, we're here to help.
 
-# Contributing
+## Contributing
 
 We welcome contributions of all sizes! Here's how you can help:
 

@@ -1,3 +1,5 @@
+js/sdk/**/*.js
+js/tests/*
 **/.DS_Store
 .env
 .DS_Store
@@ -13,6 +15,7 @@ env/
 dump/*
 .next
 node_modules
+.idea
 
 coverage.xml
 .coverage
@@ -32,3 +35,9 @@ dist/
 *.test
 go.work
 go.work.sum
+
+.vscode/
+.python-version
+.ruff_cache/
+*.egg-info
+.venv
