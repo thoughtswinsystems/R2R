@@ -70,12 +70,12 @@ spec:
         readinessProbe:
           httpGet:
             port: 7272
-            path: /v2/health
+            path: /v3/health
           initialDelaySeconds: 15
         livenessProbe:
           httpGet:
             port: 7272
-            path: /v2/health
+            path: /v3/health
           initialDelaySeconds: 15
           periodSeconds: 10
         resources:
