@@ -80,7 +80,7 @@ spec:
           periodSeconds: 10
         resources:
           requests:
-            memory: "1Gi"
+            memory: "512Mi"
             cpu: "0.5"
           limits:
             memory: "2Gi"
