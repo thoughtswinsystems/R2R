@@ -17,6 +17,10 @@ base_model = "azure/text-embedding-3-large"
 [completion_embedding]
 base_model = "azure/text-embedding-3-large"
 
+[database]
+  [database.graph_creation_settings]
+    clustering_mode = "remote"
+
 [ingestion]
 provider = "unstructured_local"
 strategy = "auto"
