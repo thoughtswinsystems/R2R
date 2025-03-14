@@ -1,0 +1,43 @@
+# Deployment and Service for Unstructured
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: graph-clustering
+  namespace: r2r-prod
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: graph-clustering
+  template:
+    metadata:
+      labels:
+        app: graph-clustering
+    spec:
+      containers:
+      - name: graph-clustering
+        image: ragtoriches/cluster-prod
+        ports:
+          - containerPort: 7276
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "0.5"
+          limits:
+            memory: "2Gi"
+            cpu: "2"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: graph-clustering
+  namespace: r2r-prod
+spec:
+  ports:
+  - protocol: TCP
+    port: 7276
+    targetPort: 7276
+  selector:
+    app: graph-clustering
