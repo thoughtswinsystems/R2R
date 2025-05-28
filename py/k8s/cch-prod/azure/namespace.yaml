@@ -1,0 +1,7 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: r2r-prod
+  labels:
+    name: r2r-prod
