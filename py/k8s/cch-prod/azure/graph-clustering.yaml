@@ -16,17 +16,22 @@ spec:
         app: graph-clustering
     spec:
       containers:
-      - name: graph-clustering
-        image: ragtoriches/cluster-prod
-        ports:
-          - containerPort: 7276
-        resources:
-          requests:
-            memory: "512Mi"
-            cpu: "0.5"
-          limits:
-            memory: "2Gi"
-            cpu: "2"
+        - name: graph-clustering
+          image: ragtoriches/cluster-prod
+          ports:
+            - containerPort: 7276
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "0.5"
+            limits:
+              memory: "2Gi"
+              cpu: "2"
+      tolerations:
+        - key: "workload"
+          operator: "Equal"
+          value: "worker"
+          effect: "NoSchedule"
 
 ---
 apiVersion: v1

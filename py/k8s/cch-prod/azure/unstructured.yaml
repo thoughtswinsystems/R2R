@@ -16,17 +16,22 @@ spec:
         app: unstructured
     spec:
       containers:
-      - name: unstructured
-        image: ragtoriches/unst-prod
-        ports:
-          - containerPort: 7275
-        resources:
-          requests:
-            memory: "1Gi"
-            cpu: "0.5"
-          limits:
-            memory: "2Gi"
-            cpu: "2"
+        - name: unstructured
+          image: ragtoriches/unst-prod
+          ports:
+            - containerPort: 7275
+          resources:
+            requests:
+              memory: "1Gi"
+              cpu: "0.5"
+            limits:
+              memory: "2Gi"
+              cpu: "2"
+      tolerations:
+        - key: "workload"
+          operator: "Equal"
+          value: "worker"
+          effect: "NoSchedule"
 
 ---
 apiVersion: v1
